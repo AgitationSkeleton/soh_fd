@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <ship/resource/Resource.h>
 #include <libultraship/libultra/types.h>
 

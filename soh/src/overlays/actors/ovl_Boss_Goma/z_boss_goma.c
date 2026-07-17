@@ -889,7 +889,7 @@ void BossGoma_Encounter(BossGoma* this, PlayState* play) {
             Math_ApproachS(&this->actor.world.rot.y, Actor_WorldYawTowardActor(&this->actor, &GET_PLAYER(play)->actor),
                            2, 0x7D0);
 
-            if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+            if (this->actor.bgCheckFlags & 1) {
                 this->actionState = 130;
                 this->actor.velocity.y = 0.0f;
                 Animation_Change(&this->skelanime, &gGohmaInitialLandingAnim, 1.0f, 0.0f,
@@ -1320,7 +1320,7 @@ void BossGoma_FloorAttack(BossGoma* this, PlayState* play) {
 
             if (Animation_OnFrame(&this->skelanime, 10.0f)) {
                 BossGoma_PlayEffectsAndSfx(this, play, 3, 5);
-                Actor_RequestQuakeAndRumble(&this->actor, play, 5, 15);
+                func_80033E88(&this->actor, play, 5, 15);
             }
 
             if (Animation_OnFrame(&this->skelanime, Animation_GetLastFrame(&gGohmaAttackAnim))) {
@@ -1441,11 +1441,11 @@ void BossGoma_FallJump(BossGoma* this, PlayState* play) {
     Math_ApproachS(&this->actor.world.rot.y, Actor_WorldYawTowardActor(&this->actor, &GET_PLAYER(play)->actor), 2,
                    0x7D0);
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+    if (this->actor.bgCheckFlags & 1) {
         BossGoma_SetupFloorLand(this);
         this->actor.velocity.y = 0.0f;
         BossGoma_PlayEffectsAndSfx(this, play, 0, 8);
-        Actor_RequestQuakeAndRumble(&this->actor, play, 5, 0xF);
+        func_80033E88(&this->actor, play, 5, 0xF);
     }
 }
 
@@ -1458,11 +1458,11 @@ void BossGoma_FallStruckDown(BossGoma* this, PlayState* play) {
     Math_ApproachS(&this->actor.world.rot.y, Actor_WorldYawTowardActor(&this->actor, &GET_PLAYER(play)->actor), 3,
                    0x7D0);
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+    if (this->actor.bgCheckFlags & 1) {
         BossGoma_SetupFloorLandStruckDown(this);
         this->actor.velocity.y = 0.0f;
         BossGoma_PlayEffectsAndSfx(this, play, 0, 8);
-        Actor_RequestQuakeAndRumble(&this->actor, play, 0xA, 0xF);
+        func_80033E88(&this->actor, play, 0xA, 0xF);
         Audio_PlayActorSound2(&this->actor, NA_SE_EN_GOMA_DAM1);
     }
 }
@@ -1651,11 +1651,11 @@ void BossGoma_FloorMain(BossGoma* this, PlayState* play) {
         }
     }
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+    if (this->actor.bgCheckFlags & 1) {
         this->actor.velocity.y = 0.0f;
     }
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_WALL) {
+    if (this->actor.bgCheckFlags & 8) {
         BossGoma_SetupWallClimb(this);
     }
 
@@ -1702,7 +1702,7 @@ void BossGoma_CeilingMoveToCenter(BossGoma* this, PlayState* play) {
     Math_ApproachS(&this->actor.shape.rot.x, -0x8000, 3, 0x3E8);
 
     // avoid walking into a wall?
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_WALL) {
+    if (this->actor.bgCheckFlags & 8) {
         angle = this->actor.shape.rot.y + 0x8000;
 
         if (angle < this->actor.wallYaw) {
@@ -1851,7 +1851,11 @@ void BossGoma_UpdateHit(BossGoma* this, PlayState* play) {
 
                 this->invincibilityFrames = 10;
             } else if (this->actionFunc != BossGoma_FloorStunned && this->patienceTimer != 0 &&
-                       (acHitInfo->toucher.dmgFlags & 0x00000005)) {
+                       ((acHitInfo->toucher.dmgFlags & 0x00000005) ||
+                        EnMThunder_IsFdSwordBeam(this->collider.base.ac))) {
+                // FD (2026-07-12) BOSS PARITY (aegiker): a Fierce Deity sword beam stuns Gohma to the floor from
+                // range like the slingshot/deku-nut, and holds her stunned 180 frames -- the LONGEST of any option
+                // (vs 40 deku nut / 90 default). RE Boss_Goma z_boss_goma.c:1845 (`& DMG_SWORD_BEAM` -> 180).
                 Audio_PlayActorSound2(&this->actor, NA_SE_EN_GOMA_DAM2);
                 Audio_StopSfxById(NA_SE_EN_GOMA_CRY1);
                 this->invincibilityFrames = 10;
@@ -1860,12 +1864,14 @@ void BossGoma_UpdateHit(BossGoma* this, PlayState* play) {
 
                 if (acHitInfo->toucher.dmgFlags & 1) {
                     this->framesUntilNextAction = 40;
+                } else if (EnMThunder_IsFdSwordBeam(this->collider.base.ac)) {
+                    this->framesUntilNextAction = 180; // FD sword beam: longest stun (aegiker parity)
                 } else {
                     this->framesUntilNextAction = 90;
                 }
 
                 this->timer = 4;
-                Actor_RequestQuakeAndRumble(&this->actor, play, 4, 0xC);
+                func_80033E88(&this->actor, play, 4, 0xC);
             }
         }
     }

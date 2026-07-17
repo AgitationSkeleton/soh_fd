@@ -230,7 +230,7 @@ void EnDivingGame_Talk(EnDivingGame* this, PlayState* play) {
                         break;
                 }
             }
-            Actor_OfferTalk(&this->actor, play, 80.0f);
+            func_8002F2CC(&this->actor, play, 80.0f);
         }
     }
 }
@@ -520,7 +520,7 @@ void EnDivingGame_Update(Actor* thisx, PlayState* play2) {
     }
 
     if (gSaveContext.timerSeconds == 10) {
-        Audio_SetFastTempoForTimedMinigame();
+        func_800F5918();
     }
     if (this->eyeTimer == 0) {
         this->eyeTimer = 2;

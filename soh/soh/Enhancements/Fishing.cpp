@@ -9,7 +9,7 @@ f32 Fishing_GetMinimumRequiredScore();
 
 void BuildFishingMessage(uint16_t* textId, bool* loadFromMessageTable) {
     if (gSaveContext.minigameScore == 0) {
-        gSaveContext.minigameScore = static_cast<u16>(Fishing_GetMinimumRequiredScore());
+        gSaveContext.minigameScore = Fishing_GetMinimumRequiredScore();
     }
 }
 

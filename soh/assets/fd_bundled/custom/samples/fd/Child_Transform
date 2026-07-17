@@ -1,0 +1,3 @@
+<Sample Version="0" CustomFormat="wav" Codec="S16" Medium="Ram" bit26="0" Size="348344" Path="custom/samples/fd/Child_Transform.wav">
+    <ADPCMLoop Start="0" End="174172" Count="0"/>
+</Sample>

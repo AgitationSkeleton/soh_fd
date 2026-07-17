@@ -240,6 +240,12 @@ typedef enum {
     TEXT_SHOOTING_GALLERY_MAN_COME_BACK_WITH_BOW = 0x9210,
     TEXT_CARPET_SALESMAN_MYSTERIOUS = 0x9211,
     TEXT_CARPET_SALESMAN_ARMS_DEALER = 0x9212,
+    TEXT_FIERCE_DEITY_MASK = 0x9300, // FD (2026-07-11): custom FD-mask acquisition textbox
+    // FD (2026-07-12) #7/#8: transformation-mask safeguards (RE fd_build text 0x71B3-0x71B5; reuse those free ids).
+    TEXT_TRANSFORM_TOO_BIG = 0x71B3,       // Epona mount block ("You're too big!!")
+    TEXT_TRANSFORM_CANT_DO_THAT = 0x71B4,  // Master Sword pedestal block ("...current form!")
+    TEXT_TRANSFORM_WATER_WARNING = 0x71B5, // Water stuck-safeguard two-choice
+    TEXT_TRANSFORM_FISHING_SCARY = 0x71B6, // FD (2026-07-13): fishing-hole owner "scary face" nag (MM3D parity)
 } TextIDs;
 
 #ifdef __cplusplus

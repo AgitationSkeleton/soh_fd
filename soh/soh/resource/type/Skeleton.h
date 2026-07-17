@@ -78,8 +78,6 @@ class Skeleton : public Ship::Resource<SkeletonData> {
 struct SkeletonPatchInfo {
     SkelAnime* skelAnime;
     std::string vanillaSkeletonPath;
-
-    u8 lastSkeletonId;
     bool isLocalPlayer;
 };
 

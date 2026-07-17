@@ -311,6 +311,8 @@ typedef enum {
     /* 0x9B */ ITEM_NUT_UPGRADE_40,
     /* 0x9C */ ITEM_CUSTOM,
     /* 0x9D */ ITEM_ROCS_FEATHER,
+    /* 0x9E */ ITEM_SWORD_DEITY, // Fierce Deity items (aegiker RE->SoH port 2026-07-11); appended after SoH
+    /* 0x9F */ ITEM_MASK_DEITY,  // customs (NOT fd_build's 0x3E/0x3F, which are SHIELD_DEKU/HYLIAN in stock OoT)
     /* 0xFC */ ITEM_LAST_USED = 0xFC,
     /* 0xFE */ ITEM_NONE_FE = 0xFE,
     /* 0xFF */ ITEM_NONE = 0xFF

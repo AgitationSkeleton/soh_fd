@@ -4,6 +4,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <libultraship/libultraship.h>
 #include <functions.h>
 #include "soh/ShipUtils.h"
 #include "soh/OTRGlobals.h"
@@ -13,6 +14,7 @@
 #include "soh/SohGui/SohGui.hpp"
 #include "AudioCollection.h"
 #include "soh/Enhancements/enhancementTypes.h"
+#include "soh/ShipUtils.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/randomizer/SeedContext.h"
 
@@ -238,7 +240,7 @@ void DrawPreviewButton(uint16_t sequenceId, std::string sfxKey, SeqType sequence
                 if (sequenceType == SEQ_SFX || sequenceType == SEQ_VOICE) {
                     Audio_PlaySoundGeneral(sequenceId, &pos, 4, &freqScale, &freqScale, &reverbAdd);
                 } else if (sequenceType == SEQ_INSTRUMENT) {
-                    AudioOcarina_SetInstrument(sequenceId - INSTRUMENT_OFFSET);
+                    Audio_OcaSetInstrument(sequenceId - INSTRUMENT_OFFSET);
                     Audio_OcaSetSongPlayback(9, 1);
                 } else {
                     // TODO: Cant do both here, so have to click preview button twice
@@ -321,9 +323,10 @@ void Draw_SfxTab(const std::string& tabId, SeqType type, const std::string& tabN
         if (~(seqData.category) & type) {
             continue;
         }
-        // Do not display custom sequences in the list
+        // Do not display custom sequences in the list, EXCEPT customs explicitly flagged replaceable
+        // (FD (2026-07-12) #1: the "Get a Mask" fanfare), which get their own swappable row like a vanilla fanfare.
         if ((((seqData.category & SEQ_BGM_CUSTOM) || seqData.category == SEQ_FANFARE) &&
-             defaultValue >= MAX_AUTHENTIC_SEQID) ||
+             defaultValue >= MAX_AUTHENTIC_SEQID && !seqData.canBeReplaced) ||
             seqData.canBeReplaced == false) {
             continue;
         }
@@ -408,8 +411,7 @@ void Draw_SfxTab(const std::string& tabId, SeqType type, const std::string& tabN
 
             if (validSequences.size()) {
                 auto it = validSequences.begin();
-                const auto& seqData =
-                    *std::next(it, ShipUtils::Random(0, static_cast<uint32_t>(validSequences.size())));
+                const auto& seqData = *std::next(it, ShipUtils::Random(0, validSequences.size()));
                 CVarSetInteger(cvarKey.c_str(), seqData->sequenceId);
                 if (locked) {
                     CVarClear(cvarLockKey.c_str());

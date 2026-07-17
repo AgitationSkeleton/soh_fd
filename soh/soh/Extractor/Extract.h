@@ -31,6 +31,9 @@ class Extractor {
     std::string mCurrentRomPath;
     std::string mSearchPath;
     size_t mCurRomSize = 0;
+    // FD (2026-07-16): when true, this Extractor validates/extracts a Majora's Mask ROM (for fd.o2r
+    // generation) instead of Ocarina of Time. Guards MM-specific branches so the OoT path is unchanged.
+    bool mIsMM = false;
 
     bool GetRomPathFromBox();
 
@@ -62,6 +65,12 @@ class Extractor {
     void SetSearchPath(const std::string& path);
     void GetRoms(std::vector<std::string>& roms);
     bool RunFileStandalone(std::string file);
+    // FD (2026-07-16): put this Extractor into Majora's Mask mode (for fd.o2r generation).
+    void SetMM(bool isMM) { mIsMM = isMM; }
+    // FD (2026-07-16): run ZAPD against the (already-validated) MM ROM using the curated MM XML subset,
+    // producing a full temp extract archive. Returns its absolute path ("" on failure); caller deletes it.
+    std::string ExtractCuratedToTemp(std::string installPath, std::atomic<size_t>* extractCount,
+                                     std::atomic<size_t>* totalExtract);
     bool Run(std::string searchPath, RomSearchMode searchMode = RomSearchMode::Both);
     bool CallZapd(std::string installPath, std::string exportdir, std::atomic<size_t>* extractCount,
                   std::atomic<size_t>* totalExtract);

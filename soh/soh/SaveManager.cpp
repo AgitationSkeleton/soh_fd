@@ -9,12 +9,15 @@
 #include "Enhancements/randomizer/hint.h"
 #include "Enhancements/randomizer/item.h"
 #include "soh/Enhancements/randomizer/settings.h"
+#include "soh/Enhancements/FierceDeityMaskCycle.h" // FD (2026-07-13): save-audit scrub/reset of the shared FD-mask slot
 #include "ResourceManagerHelpers.h"
 
 #include "z64.h"
+#include "cvar_prefixes.h"
 #include "functions.h"
 #include "macros.h"
 #include <variables.h>
+#include <libultraship/libultraship.h>
 #include "soh/SohGui/SohGui.hpp"
 
 #define NOGDI // avoid various windows defines that conflict with things in z64.h
@@ -572,7 +575,10 @@ void SaveManager::StartupCheckAndInitMeta(int fileNum) {
             (int16_t)baseBlock["randomizerInf"][RAND_INF_HAS_WALLET >> 4] & (1 << (RAND_INF_HAS_WALLET & 0xF));
         fileMetaInfo[fileNum].triforcePieces = randoBlock.value("triforcePiecesCollected", 0);
         nlohmann::json& randoSettings = randoBlock["randoSettings"];
-        fileMetaInfo[fileNum].maxTriforcePieces = randoSettings[RSK_TRIFORCE_HUNT_PIECES_TOTAL].get<uint8_t>();
+        if (randoSettings[RSK_TRIFORCE_HUNT].get<uint8_t>() != 0) {
+            fileMetaInfo[fileNum].maxTriforcePieces =
+                randoSettings[RSK_TRIFORCE_HUNT_PIECES_REQUIRED].get<uint8_t>() + 1;
+        }
         fileMetaInfo[fileNum].hasFishingRod = (int16_t)baseBlock["randomizerInf"][RAND_INF_FISHING_POLE_FOUND >> 4] &
                                               (1 << (RAND_INF_FISHING_POLE_FOUND & 0xF));
         fileMetaInfo[fileNum].fishingPoleShuffled = randoSettings[RSK_SHUFFLE_FISHING_POLE].get<uint8_t>() != 0;
@@ -618,8 +624,9 @@ void SaveManager::InitMeta(int fileNum) {
     fileMetaInfo[fileNum].health = gSaveContext.health;
     auto randoContext = Rando::Context::GetInstance();
 
-    fileMetaInfo[fileNum].maxTriforcePieces =
-        IS_RANDO ? randoContext->GetOption(RSK_TRIFORCE_HUNT_PIECES_TOTAL).Get() : 0;
+    fileMetaInfo[fileNum].maxTriforcePieces = IS_RANDO && (bool)randoContext->GetOption(RSK_TRIFORCE_HUNT)
+                                                  ? randoContext->GetOption(RSK_TRIFORCE_HUNT_PIECES_REQUIRED).Get() + 1
+                                                  : 0;
     fileMetaInfo[fileNum].fishingPoleShuffled =
         IS_RANDO ? (bool)randoContext->GetOption(RSK_SHUFFLE_FISHING_POLE) : false;
 
@@ -831,21 +838,21 @@ void SaveManager::InitFileDebug() {
 
     gSaveContext.deaths = 0;
     if (ResourceMgr_GetGameRegion(0) == GAME_REGION_PAL && gSaveContext.language != LANGUAGE_JPN) {
-        const static std::array<u8, 8> sPlayerName = { 0x15, 0x12, 0x17, 0x14, 0x3E, 0x3E, 0x3E, 0x3E };
+        const static std::array<u8, 8> sPlayerName = { '\x15', '\x12', '\x17', '\x14', '\x3E', '\x3E', '\x3E', '\x3E' };
 
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.playerName); i++) {
             gSaveContext.playerName[i] = sPlayerName[i];
         }
         gSaveContext.ship.filenameLanguage = NAME_LANGUAGE_PAL;
     } else if (gSaveContext.language == LANGUAGE_JPN) { // Japanese
-        const static std::array<u8, 8> sPlayerName = { 0x81, 0x87, 0x61, 0xDF, 0xDF, 0xDF, 0xDF, 0xDF };
+        const static std::array<u8, 8> sPlayerName = { '\x81', '\x87', '\x61', '\xDF', '\xDF', '\xDF', '\xDF', '\xDF' };
 
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.playerName); i++) {
             gSaveContext.playerName[i] = sPlayerName[i];
         }
         gSaveContext.ship.filenameLanguage = NAME_LANGUAGE_NTSC_JPN;
     } else { // GAME_REGION_NTSC
-        const static std::array<u8, 8> sPlayerName = { 0xB6, 0xB3, 0xB8, 0xB5, 0xDF, 0xDF, 0xDF, 0xDF };
+        const static std::array<u8, 8> sPlayerName = { '\xB6', '\xB3', '\xB8', '\xB5', '\xDF', '\xDF', '\xDF', '\xDF' };
 
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.playerName); i++) {
             gSaveContext.playerName[i] = sPlayerName[i];
@@ -954,21 +961,21 @@ void SaveManager::InitFileMaxed() {
 
     gSaveContext.deaths = 0;
     if (ResourceMgr_GetGameRegion(0) == GAME_REGION_PAL && gSaveContext.language != LANGUAGE_JPN) {
-        const static std::array<u8, 8> sPlayerName = { 0x15, 0x12, 0x17, 0x14, 0x3E, 0x3E, 0x3E, 0x3E };
+        const static std::array<u8, 8> sPlayerName = { '\x15', '\x12', '\x17', '\x14', '\x3E', '\x3E', '\x3E', '\x3E' };
 
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.playerName); i++) {
             gSaveContext.playerName[i] = sPlayerName[i];
         }
         gSaveContext.ship.filenameLanguage = NAME_LANGUAGE_PAL;
     } else if (gSaveContext.language == LANGUAGE_JPN) { // Japanese
-        const static std::array<u8, 8> sPlayerName = { 0x81, 0x87, 0x61, 0xDF, 0xDF, 0xDF, 0xDF, 0xDF };
+        const static std::array<u8, 8> sPlayerName = { '\x81', '\x87', '\x61', '\xDF', '\xDF', '\xDF', '\xDF', '\xDF' };
 
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.playerName); i++) {
             gSaveContext.playerName[i] = sPlayerName[i];
         }
         gSaveContext.ship.filenameLanguage = NAME_LANGUAGE_NTSC_JPN;
     } else { // GAME_REGION_NTSC
-        const static std::array<u8, 8> sPlayerName = { 0xB6, 0xB3, 0xB8, 0xB5, 0xDF, 0xDF, 0xDF, 0xDF };
+        const static std::array<u8, 8> sPlayerName = { '\xB6', '\xB3', '\xB8', '\xB5', '\xDF', '\xDF', '\xDF', '\xDF' };
 
         for (int i = 0; i < ARRAY_COUNT(gSaveContext.playerName); i++) {
             gSaveContext.playerName[i] = sPlayerName[i];
@@ -1235,6 +1242,12 @@ void SaveManager::SaveSection(int fileNum, int sectionID, bool threaded) {
     }
     auto saveContext = new SaveContext;
     memcpy(saveContext, &gSaveContext, sizeof(gSaveContext));
+    // FD (2026-07-13) save-audit: the Fierce Deity's Mask is displayed as a fake ITEM_MASK_DEITY in SLOT_BOTTLE_1
+    // (see FierceDeityMaskCycle). The per-frame gameplay guard keeps the LIVE slot holding the real bottle, but a
+    // Save & Quit from the PAUSE menu freezes that guard while the mask is A-scrolled into the slot, so this copy
+    // can still hold the mask. Scrub the COPY (not the live menu) so the persisted SLOT_BOTTLE_1 is ALWAYS the real
+    // bottle -- the bottle can never be lost on reload, and the mask lives solely on ship.hasFierceDeityMask.
+    Enhancement_ScrubDeityMaskFromItems(saveContext->inventory.items);
     if (threaded) {
         smThreadPool->detach_task(std::bind(&SaveManager::SaveFileThreaded, this, fileNum, saveContext, sectionID));
     } else {
@@ -2163,6 +2176,25 @@ void SaveManager::LoadBaseVersion4() {
     SaveManager::Instance->LoadData("dogParams", gSaveContext.dogParams);
     SaveManager::Instance->LoadData("filenameLanguage", gSaveContext.ship.filenameLanguage);
     SaveManager::Instance->LoadData("maskMemory", gSaveContext.ship.maskMemory);
+    // FD (2026-07-12) #3: restore Fierce Deity's Mask ownership (see SaveShip). Defaults to 0 for old saves that
+    // predate the key, which is correct -- they never had the mask persisted.
+    SaveManager::Instance->LoadData("hasFierceDeityMask", gSaveContext.ship.hasFierceDeityMask);
+    // FD (2026-07-13): restore the un-transform state (see SaveShip). Default 0xFF = "not transformed" / no stashed
+    // B item, so old / non-FD saves (missing keys) don't revert to Adult + Deku Stick.
+    SaveManager::Instance->LoadData("fierceDeityPreviousForm", gSaveContext.ship.fierceDeityPreviousForm, (u8)0xFF);
+    SaveManager::Instance->LoadData("fierceDeityBButtonMemory", gSaveContext.ship.fierceDeityBButtonMemory, (u8)ITEM_NONE);
+
+    // FD (2026-07-13) save-audit: recover legacy corruption + reset per-file cycle state. A save written BEFORE the
+    // save-copy scrub could have captured the fake ITEM_MASK_DEITY in SLOT_BOTTLE_1 (from a pause-menu save). If so,
+    // the mask is unambiguously owned -- secure the flag and clear the phantom slot. The original bottle content of
+    // such a pre-fix save is unrecoverable (it was overwritten by the fake id), but the MASK is not lost and the
+    // slot becomes a clean empty bottle slot the player can refill. Then reset the runtime cycle statics so no
+    // displaced-bottle / selected-face state leaks in from a previously loaded file.
+    if (gSaveContext.inventory.items[SLOT_BOTTLE_1] == ITEM_MASK_DEITY) {
+        gSaveContext.ship.hasFierceDeityMask = 1;
+        gSaveContext.inventory.items[SLOT_BOTTLE_1] = ITEM_NONE;
+    }
+    Enhancement_ResetDeityMaskCycleState();
 }
 
 void SaveManager::SaveBase(SaveContext* saveContext, int sectionID, bool fullSave) {
@@ -2331,6 +2363,17 @@ void SaveManager::SaveBase(SaveContext* saveContext, int sectionID, bool fullSav
     SaveManager::Instance->SaveData("dogParams", saveContext->dogParams);
     SaveManager::Instance->SaveData("filenameLanguage", saveContext->ship.filenameLanguage);
     SaveManager::Instance->SaveData("maskMemory", saveContext->ship.maskMemory);
+    // FD (2026-07-12) #3: persist Fierce Deity's Mask ownership. The mask is NOT a real inventory item (it's
+    // cleared out of its shared bottle slot every frame so a save can't capture it), so ownership lives ONLY in
+    // this flag. It was never serialized, so on reload hasFierceDeityMask reset to 0 and the mask "vanished"
+    // (only the C-button assignment survived, pointing at the restored bottle). Save it so it round-trips.
+    SaveManager::Instance->SaveData("hasFierceDeityMask", saveContext->ship.hasFierceDeityMask);
+    // FD (2026-07-13): persist the un-transform RESTORE state so saving AS Fierce Deity round-trips it. These hold
+    // the age to revert to + the B-button item stashed while FD holds its sword. Unsaved, a save-made-as-FD reloads
+    // them as 0 and untransforming dumps the player to Adult Link (age 0) with a Deku Stick (ITEM_STICK==0) on B,
+    // ignoring the real pre-transform age/equip.
+    SaveManager::Instance->SaveData("fierceDeityPreviousForm", saveContext->ship.fierceDeityPreviousForm);
+    SaveManager::Instance->SaveData("fierceDeityBButtonMemory", saveContext->ship.fierceDeityBButtonMemory);
 }
 
 // Load a string into a char array based on size and ensuring it is null terminated when overflowed
@@ -2564,7 +2607,7 @@ typedef struct {
     /* 0x1354 */ s32 fileNum;  // "file_no"
     /* 0x1358 */ char unk_1358[0x0004];
     /* 0x135C */ s32 gameMode;
-    /* 0x1360 */ s32 sceneLayer;
+    /* 0x1360 */ s32 sceneSetupIndex;
     /* 0x1364 */ s32 respawnFlag;           // "restart_flag"
     /* 0x1368 */ RespawnData_v0 respawn[3]; // "restart_data"
     /* 0x13BC */ f32 entranceSpeed;

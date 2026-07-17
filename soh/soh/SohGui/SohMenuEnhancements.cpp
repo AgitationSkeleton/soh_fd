@@ -6,13 +6,13 @@
 #include <soh/Enhancements/cosmetics/authenticGfxPatches.h>
 #include <soh/Enhancements/TimeDisplay/TimeDisplay.h>
 #include "soh/Enhancements/randomizer/randomizer.h"
-#include "soh/Enhancements/Restorations/GetItemManipulation.h"
-#include <ship/Context.h>
 
 extern "C" {
 #include "functions.h"
 #include "variables.h"
 extern PlayState* gPlayState;
+// FD (2026-07-11): grants the Fierce Deity mask via the get-item acquisition sequence.
+void GiveFierceDeityMask(void);
 }
 
 #define CVAR_INT_SHIP_INIT(cvar, val) \
@@ -61,18 +61,6 @@ static const std::map<int32_t, const char*> timeTravelOptions = {
     { TIME_TRAVEL_OOT_MS, "Ocarina of Time + Master Sword" },
     { TIME_TRAVEL_ANY, "Any Ocarina" },
     { TIME_TRAVEL_ANY_MS, "Any Ocarina + Master Sword" },
-};
-
-static const std::map<int32_t, const char*> getItemManipulationOptions = {
-    { GIM_DISABLED, "Disabled" },   { GIM_NTSC_1_0, "NTSC 1.0" },
-    { GIM_NTSC_1_1, "NTSC 1.1" },   { GIM_NTSC_1_2, "NTSC 1.2" },
-    { GIM_PAL_1_0, "PAL 1.0" },     { GIM_PAL_1_1, "PAL 1.1" },
-    { GIM_GC_U, "GC U" },           { GIM_GC_E, "GC E" },
-    { GIM_GC_J, "GC J" },           { GIM_MQ_U, "MQ U" },
-    { GIM_MQ_E, "MQ E" },           { GIM_MQ_J, "MQ J" },
-    { GIM_IQUE_CHN, "IQUE CHN" },   { GIM_IQUE_TWN, "IQUE TWN" },
-    { GIM_MQ_DEBUG, "MQ DEBUG" },   { GIM_MZX_NTSC, "MZX NTSC 1.0" },
-    { GIM_MZX_PAL, "MZX PAL 1.1" },
 };
 
 static const std::map<int32_t, const char*> sleepingWaterfallOptions = {
@@ -124,6 +112,20 @@ static const std::map<int32_t, const char*> cursorAnywhereValues = {
     { PAUSE_ANY_CURSOR_RANDO_ONLY, "Only in Rando" },
     { PAUSE_ANY_CURSOR_ALWAYS_ON, "Always" },
     { PAUSE_ANY_CURSOR_ALWAYS_OFF, "Never" },
+};
+
+// FD (2026-07-15): per-form gate for the MM Flips & Jump animation port (see Bonus Settings).
+// 0 Off / 1 Child / 2 Child+Adult / 3 Fierce Deity / 4 All. Keep in sync with MmFlips_FormGatedOn (z_player.c).
+static const std::map<int32_t, const char*> mmFlipsFormValues = {
+    { 0, "Off" }, { 1, "Child" }, { 2, "Child + Adult" }, { 3, "Fierce Deity" }, { 4, "All" },
+};
+
+// FD (2026-07-15): "Unrestrict Items for FD" cheat dropdown (Transformation Masks). Keep in sync with
+// Parameter_CanUseItem (z_parameter.c). 0 Off / 1 Nuts+Bombs+Spells / 2 All except swords+shields.
+static const std::map<int32_t, const char*> fdUnrestrictItemsValues = {
+    { 0, "Off" },
+    { 1, "Deku Nuts, Bombs & Spells" },
+    { 2, "All (Except Swords + Shields)" },
 };
 
 static const std::map<int32_t, const char*> zFightingOptions = {
@@ -309,18 +311,6 @@ void SohMenu::AddMenuEnhancements() {
         .CVar(CVAR_ENHANCEMENT("BetterOwl"))
         .Options(CheckboxOptions().Tooltip(
             "The default response to Kaepora Gaebora is always that you understood what he said."));
-    AddWidget(path, "Easy Butterfly Fairies", WIDGET_CVAR_CHECKBOX)
-        .CVar(CVAR_ENHANCEMENT("EasyButterflyFairies"))
-        .PreFunc([](WidgetInfo& info) {
-            info.options->disabled =
-                IS_RANDO &&
-                OTRGlobals::Instance->gRandoContext->GetOption(RSK_SHUFFLE_BUTTERFLY_FAIRIES).Is(RO_GENERIC_ON);
-            info.options->disabledTooltip = "This setting is forcefully enabled because a randomizer savefile with "
-                                            "\"Butterfly Fairies Shuffle\" is loaded.";
-        })
-        .Options(CheckboxOptions().Tooltip(
-            "Butterflies will transform into a fairy as soon as you approach them with a Deku Stick, "
-            "skipping the need to stand still and let the butterfly land on your stick."));
 
     AddWidget(path, "Convenience", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Quit Fishing at Door", WIDGET_CVAR_CHECKBOX)
@@ -487,16 +477,6 @@ void SohMenu::AddMenuEnhancements() {
         .CVar(CVAR_ENHANCEMENT("FastChests"))
         .Options(CheckboxOptions().Tooltip("Makes Link always kick the chest to open it, instead of doing the longer "
                                            "chest opening animation for major items."));
-    AddWidget(path, "Improved Roll", WIDGET_CVAR_CHECKBOX)
-        .CVar(CVAR_ENHANCEMENT("ImprovedRoll"))
-        .Options(CheckboxOptions().Tooltip(
-            "Allows Link to chain a new roll by pressing A during a roll, maintaining maximum roll speed."));
-    AddWidget(path, "Improved Roll Steering", WIDGET_CVAR_CHECKBOX)
-        .CVar(CVAR_ENHANCEMENT("ImprovedRollSteering"))
-        .PreFunc([](WidgetInfo& info) { info.isHidden = !CVarGetInteger(CVAR_ENHANCEMENT("ImprovedRoll"), 0); })
-        .Options(CheckboxOptions().Tooltip(
-            "Allows slight directional steering with the control stick while rolling. "
-            "Steering is automatically disabled while Z is held, preserving Z-target roll glitch setups."));
     AddWidget(path, "Skip Water Take Breath Animation", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("SkipSwimDeepEndAnim"))
         .Options(CheckboxOptions().Tooltip("Skips Link's taking breath animation after coming up from water. "
@@ -527,7 +507,7 @@ void SohMenu::AddMenuEnhancements() {
 
     path.column = SECTION_COLUMN_3;
     AddWidget(path, "Misc", WIDGET_SEPARATOR_TEXT);
-    AddWidget(path, "Skip Child Stealth##Enhancement", WIDGET_CVAR_CHECKBOX)
+    AddWidget(path, "Skip Child Stealth", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("TimeSavers.SkipChildStealth"))
         .Options(CheckboxOptions().Tooltip(
             "The crawlspace into Hyrule Castle goes straight to Zelda, skipping the guards."));
@@ -945,7 +925,7 @@ void SohMenu::AddMenuEnhancements() {
     AddWidget(path, "Skip Magic Arrow Equip Animation", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("SkipArrowAnimation"));
     // TODO: See if a Callback could be registered to avoid the need to reload scenes for the next two options.
-    AddWidget(path, "Blue Fire Arrows##Enhancement", WIDGET_CVAR_CHECKBOX)
+    AddWidget(path, "Blue Fire Arrows", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("BlueFireArrows"))
         .PreFunc([](WidgetInfo& info) {
             info.options->disabled =
@@ -955,7 +935,7 @@ void SohMenu::AddMenuEnhancements() {
         })
         .Options(CheckboxOptions().Tooltip(
             "Allows Ice Arrows to melt Red Ice. May require a room reload if toggled during gameplay."));
-    AddWidget(path, "Sunlight Arrows##Enhancement", WIDGET_CVAR_CHECKBOX)
+    AddWidget(path, "Sunlight Arrows", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("SunlightArrows"))
         .PreFunc([](WidgetInfo& info) {
             info.options->disabled =
@@ -1238,11 +1218,6 @@ void SohMenu::AddMenuEnhancements() {
         .RaceDisable(false)
         .Options(CheckboxOptions().Tooltip(
             "Restores an unfinished feature to pulsate the boss room icon when you are in the boss room."));
-    AddWidget(path, "Saria's Friends Forever Gesture", WIDGET_CVAR_CHECKBOX)
-        .CVar(CVAR_ENHANCEMENT("SariaGestureFriendsForever"))
-        .RaceDisable(false)
-        .Options(CheckboxOptions().Tooltip(
-            "Restores an unused animation of Saria when she says, \"Saria and Link will be friends forever.\""));
 
     AddWidget(path, "Glitch Restorations", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Fish while Hovering", WIDGET_CVAR_CHECKBOX)
@@ -1271,13 +1246,6 @@ void SohMenu::AddMenuEnhancements() {
         .Options(CheckboxOptions().Tooltip(
             "Restores a bug from NTSC 1.0/1.1 that allows you to obtain the eyeball frog from King Zora "
             "instead of the Zora Tunic by Holding Shield."));
-    AddWidget(path, "Get Item Manipulation", WIDGET_CVAR_COMBOBOX)
-        .CVar(CVAR_ENHANCEMENT("GetItemManipulation"))
-        .Options(ComboboxOptions()
-                     .ComboMap(getItemManipulationOptions)
-                     .DefaultIndex(GIM_DISABLED)
-                     .Tooltip("Restores Get Item Manipulation.\n"
-                              "NTSC and PAL have separate tables."));
 
     AddWidget(path, "Misc Restorations", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Fix L&Z Page Switch in Pause Menu", WIDGET_CVAR_CHECKBOX)
@@ -1703,10 +1671,6 @@ void SohMenu::AddMenuEnhancements() {
     AddWidget(path, "Rupee Dash Mode", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_ENHANCEMENT("RupeeDash"))
         .Options(CheckboxOptions().Tooltip("Rupees reduce over time, Link suffers damage when the count hits 0."));
-    AddWidget(path, "Rupee Dash Wallet Scaling", WIDGET_CVAR_CHECKBOX)
-        .CVar(CVAR_ENHANCEMENT("RupeeDashScaling"))
-        .PreFunc([](WidgetInfo& info) { info.isHidden = CVarGetInteger(CVAR_ENHANCEMENT("RupeeDash"), 0) == 0; })
-        .Options(CheckboxOptions().DefaultValue(true).Tooltip("The larger Link's wallet, the faster Rupees reduce."));
     AddWidget(path, "Rupee Dash Interval %d seconds", WIDGET_CVAR_SLIDER_INT)
         .CVar(CVAR_ENHANCEMENT("RupeeDashInterval"))
         .PreFunc([](WidgetInfo& info) { info.isHidden = CVarGetInteger(CVAR_ENHANCEMENT("RupeeDash"), 0) == 0; })
@@ -2027,6 +1991,148 @@ void SohMenu::AddMenuEnhancements() {
             .CVar(timer.timeEnable)
             .Callback([](WidgetInfo& info) { TimeDisplayUpdateDisplayOptions(); });
     }
+
+    // FD (2026-07-11): Transformation Masks
+    path.sidebarName = "Transformation Masks";
+    AddSidebarEntry("Enhancements", path.sidebarName, 1);
+    path.column = SECTION_COLUMN_1;
+
+    // FD (2026-07-13): the transformation-mask system is the whole point of this fork, so it is ALWAYS ON. Turning
+    // it off could desync saves / inventories / connected players in a cascading way, so the master toggle was
+    // retired -- every read of TransformationMasks.Enabled defaults to 1 (on) and the UI switch is removed.
+    // AddWidget(path, "Enable Transformation Masks", WIDGET_CVAR_CHECKBOX)
+    //     .CVar(CVAR_ENHANCEMENT("TransformationMasks.Enabled"))
+    //     .Options(CheckboxOptions().Tooltip("Master switch for the transformation mask system."));
+
+    AddWidget(path, "Form Rules", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "Forms Wear Trade Masks", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FormsWearTradeMasks"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Lets your transformed forms wear the child trade masks (Bunny Hood, Mask of Truth, and so on) "
+            "without turning back or having them unequipped."));
+    AddWidget(path, "Stuck Safeguards (Navi turn-back prompt)", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_ENHANCEMENT("TransformationMasks.StuckSafeguards"))
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+            "Has Navi offer to turn you back into a human wherever a form could get stuck, like the Water "
+            "Temple, so you can't soft-lock."));
+    AddWidget(path, "Prevent Restricted Actions (\"current form!\")", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.PreventRestrictedActions"))
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+            "Stops forms from pulling the Master Sword or riding Epona. Navi says you can't do that in your "
+            "current form."));
+
+    AddWidget(path, "Fierce Deity", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "FD Usable Anywhere", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdUsableAnywhere"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Lets you use the Fierce Deity's Mask anywhere. When off, it only works in boss rooms and the "
+            "fishing hole, and you turn back when you leave, matching Majora's Mask."));
+    AddWidget(path, "FD Can Play Ocarina", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdCanPlayOcarina"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Lets Fierce Deity play the ocarina instead of graying it out."));
+    AddWidget(path, "FD Can Sheathe Sword", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdCanSheathe"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Lets Fierce Deity put his sword away, which he normally keeps drawn."));
+    AddWidget(path, "FD Beams Break Rocks", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdBeamsBreakRocks"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Lets Fierce Deity's sword beams shatter bomb-breakable rocks."));
+    AddWidget(path, "FD Beams Light Fire", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdBeamsLightFire"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Lets Fierce Deity's sword beams light torches and burn webs. Also makes the beams hit as hard "
+            "as fire arrows."));
+    AddWidget(path, "FD Magic Spin", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdMagicSpin"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Gives Fierce Deity's spin attack its glowing energy disk. When off, his spin is a plain "
+            "magicless sweep, matching Majora's Mask."));
+    AddWidget(path, "FD Increased Strength", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdIncreasedStrength"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Gives Fierce Deity the lifting strength of the Gold Gauntlets, so he can pick up the heaviest "
+            "objects."));
+    AddWidget(path, "Unrestrict Items for FD", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdUnrestrictItems"))
+        .Options(ComboboxOptions()
+                     .ComboMap(fdUnrestrictItemsValues)
+                     .DefaultIndex(0)
+                     .Tooltip("Lets Fierce Deity use items he'd normally have grayed out. \"Deku Nuts, Bombs & "
+                              "Spells\" allows just those. \"All\" un-grays every item except swords and shields, "
+                              "like Timeless Equipment for the deity form. Off keeps his normal item restrictions."));
+    // FD (2026-07-13): Fierce Deity's Majora's-Mask gait (faster run + slower leg cadence so his big body strides
+    // naturally instead of scurrying) is now always on -- it's a clear improvement with no downside, so its toggle
+    // and the old slower/frantic behavior were retired.
+    // AddWidget(path, "Natural Walk (Majora's Mask gait)", WIDGET_CVAR_CHECKBOX)
+    //     .CVar(CVAR_ENHANCEMENT("TransformationMasks.FdWalkTuning"))
+    //     .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+    //         "Gives Fierce Deity Majora's Mask's own stride -- he runs a bit faster and his legs cycle slower."));
+    // FD (2026-07-13): the door-open fix (adult animation + age-properties so FD opens doors at Adult Link size
+    // without sinking) is now always on -- it looks correct with no downside, so its toggle was retired.
+    // AddWidget(path, "Fix Door-Open Sinking", WIDGET_CVAR_CHECKBOX)
+    //     .CVar(CVAR_ENHANCEMENT("TransformationMasks.DoorScaleFix"))
+    //     .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+    //         "Keeps Fierce Deity from sinking into the floor while opening doors."));
+    AddWidget(path, "Give Fierce Deity's Mask", WIDGET_BUTTON)
+        .Options(ButtonOptions()
+                     .Tooltip("Gives you the Fierce Deity's Mask and equips it to a free C button. "
+                              "Must be in-game.")
+                     .Size(Sizes::Inline))
+        .Callback([](WidgetInfo& info) {
+            if (gPlayState != NULL) {
+                GiveFierceDeityMask();
+            }
+        });
+
+    // FD (2026-07-11): Stubs for the remaining transformation masks. Enable once their grant paths
+    // exist (mirror the Fierce Deity button; each would call its own extern "C" give function).
+    // AddWidget(path, "Give Goron Mask", WIDGET_BUTTON)
+    //     .Options(ButtonOptions().Tooltip("Grants the Goron Mask. Must be in-game.").Size(Sizes::Inline))
+    //     .Callback([](WidgetInfo& info) {
+    //         if (gPlayState != NULL) {
+    //             GiveGoronMask();
+    //         }
+    //     });
+    // AddWidget(path, "Give Zora Mask", WIDGET_BUTTON)
+    //     .Options(ButtonOptions().Tooltip("Grants the Zora Mask. Must be in-game.").Size(Sizes::Inline))
+    //     .Callback([](WidgetInfo& info) {
+    //         if (gPlayState != NULL) {
+    //             GiveZoraMask();
+    //         }
+    //     });
+    // AddWidget(path, "Give Deku Mask", WIDGET_BUTTON)
+    //     .Options(ButtonOptions().Tooltip("Grants the Deku Mask. Must be in-game.").Size(Sizes::Inline))
+    //     .Callback([](WidgetInfo& info) {
+    //         if (gPlayState != NULL) {
+    //             GiveDekuMask();
+    //         }
+    //     });
+
+    // FD (2026-07-15): Bonus Settings -- Majora's-Mask-flavored ports that aren't part of the transformation
+    // system proper (jump flips, Young Link hookshot sound + hand). Sits directly beneath Transformation Masks.
+    path.sidebarName = "Bonus Settings";
+    AddSidebarEntry("Enhancements", path.sidebarName, 1);
+    path.column = SECTION_COLUMN_1;
+
+    AddWidget(path, "Majora's Mask", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "MM Jump Flips", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_ENHANCEMENT("BonusSettings.MmFlips"))
+        .Options(ComboboxOptions()
+                     .ComboMap(mmFlipsFormValues)
+                     .DefaultIndex(0)
+                     .Tooltip("Gives running jumps Majora's Mask's animations -- a random roll each jump between the "
+                              "regular jump, a front-flip, and a somersault -- for the chosen forms. Purely an "
+                              "animation change (no physics difference). Off leaves the vanilla jump untouched."));
+    AddWidget(path, "MM Young Link Hookshot Sound", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_ENHANCEMENT("BonusSettings.MmYoungLinkHookshotSound"))
+        .Options(CheckboxOptions().DefaultValue(true).Tooltip(
+            "When Young Link uses the hookshot (with Timeless Equipment), plays his own Majora's Mask grapple "
+            "sound instead of Adult Link's. Adult and Fierce Deity keep their normal sounds. Off leaves vanilla "
+            "behavior as-is."));
+    // FD (2026-07-15): the "MM Young Link Hookshot Hand" first-person viewmodel setting was removed -- that swap is
+    // already provided by a separate MM-equipment asset mod, so a fork toggle for it is redundant.
 }
 
 } // namespace SohGui

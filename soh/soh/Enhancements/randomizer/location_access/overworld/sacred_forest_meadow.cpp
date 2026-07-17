@@ -5,16 +5,13 @@ using namespace Rando;
 
 void RegionTable_Init_SacredForestMeadow() {
     // clang-format off
-    areaTable[RR_SFM_ENTRYWAY] = Region("SFM Entryway", SCENE_SACRED_FOREST_MEADOW, {
-        //Events
-        EVENT_ACCESS(LOGIC_OPEN_SFM_GATE, logic->IsChild && logic->CanKillEnemy(RE_WOLFOS)),
-    }, {
+    areaTable[RR_SFM_ENTRYWAY] = Region("SFM Entryway", SCENE_SACRED_FOREST_MEADOW, {}, {
         //Locations
         LOCATION(RC_SFM_WONDER_ENTRANCE,    true),
     }, {
         //Exits
         ENTRANCE(RR_LW_BEYOND_MIDO,       true),
-        ENTRANCE(RR_SACRED_FOREST_MEADOW, logic->IsAdult || logic->Get(LOGIC_OPEN_SFM_GATE)),
+        ENTRANCE(RR_SACRED_FOREST_MEADOW, logic->IsAdult || logic->CanKillEnemy(RE_WOLFOS)),
         ENTRANCE(RR_SFM_WOLFOS_GROTTO,    logic->CanOpenBombGrotto()),
     });
 
@@ -55,7 +52,7 @@ void RegionTable_Init_SacredForestMeadow() {
     }, {
         //Exits
         ENTRANCE(RR_FOREST_TEMPLE_ENTRYWAY, logic->CanUse(RG_HOOKSHOT)),
-        ENTRANCE(RR_SFM_ENTRYWAY,           logic->IsAdult || logic->Get(LOGIC_OPEN_SFM_GATE)),
+        ENTRANCE(RR_SFM_ENTRYWAY,           true),
         // adult can jump up, but it's a trick. being hit directly by club moblin while wearing hover boots also works, but relies on coming from LW
         ENTRANCE(RR_SFM_ABOVE_MAZE,         logic->CanClimbLadder() || (logic->IsAdult && logic->CanGroundJump())),
         ENTRANCE(RR_SFM_STORMS_GROTTO,      logic->CanOpenStormsGrotto()),
@@ -95,9 +92,9 @@ void RegionTable_Init_SacredForestMeadow() {
 
     areaTable[RR_SFM_STORMS_GROTTO] = Region("SFM Storms Grotto", SCENE_GROTTOS, {}, {
         //Locations
-        LOCATION(RC_SFM_DEKU_SCRUB_GROTTO_REAR,    logic->CanStunDeku() && logic->HasItem(RG_SPEAK_DEKU) && GetCheckPrice() <= GetWalletCapacity()),
-        LOCATION(RC_SFM_DEKU_SCRUB_GROTTO_FRONT,   logic->CanStunDeku() && logic->HasItem(RG_SPEAK_DEKU) && GetCheckPrice() <= GetWalletCapacity()),
-        LOCATION(RC_SFM_DEKU_SCRUB_GROTTO_BEEHIVE, logic->CanBreakUpperBeehives()),
+        LOCATION(RC_SFM_DEKU_SCRUB_GROTTO_REAR,  logic->CanStunDeku() && logic->HasItem(RG_SPEAK_DEKU) && GetCheckPrice() <= GetWalletCapacity()),
+        LOCATION(RC_SFM_DEKU_SCRUB_GROTTO_FRONT, logic->CanStunDeku() && logic->HasItem(RG_SPEAK_DEKU) && GetCheckPrice() <= GetWalletCapacity()),
+        LOCATION(RC_SFM_STORMS_GROTTO_BEEHIVE,   logic->CanBreakUpperBeehives()),
     }, {
         //Exits
         ENTRANCE(RR_SACRED_FOREST_MEADOW, true),

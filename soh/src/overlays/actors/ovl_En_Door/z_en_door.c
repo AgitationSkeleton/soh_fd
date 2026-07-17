@@ -244,7 +244,7 @@ void EnDoor_WaitForCheck(EnDoor* this, PlayState* play) {
     if (Actor_ProcessTalkRequest(&this->actor, play)) {
         this->actionFunc = EnDoor_Check;
     } else {
-        Actor_OfferTalk(&this->actor, play, DOOR_CHECK_RANGE);
+        func_8002F2CC(&this->actor, play, DOOR_CHECK_RANGE);
     }
 }
 

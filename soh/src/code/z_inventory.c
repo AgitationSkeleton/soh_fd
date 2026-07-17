@@ -198,7 +198,9 @@ void* gItemIcons[] = {
     "",
     "", // ITEM_CUSTOM
     // Start custom items
-    gRocsFeatherTex,
+    gRocsFeatherTex,      // ITEM_ROCS_FEATHER (0x9D)
+    gFierceDeitySwordTex, // ITEM_SWORD_DEITY  (0x9E)  FD (2026-07-11)
+    gFierceDeityMaskTex,  // ITEM_MASK_DEITY   (0x9F)  FD (2026-07-11)
 };
 
 // Used to map item IDs to inventory slots

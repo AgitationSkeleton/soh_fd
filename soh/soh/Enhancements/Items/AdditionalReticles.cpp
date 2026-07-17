@@ -2,12 +2,10 @@
 #include "soh/ShipInit.hpp"
 
 extern "C" {
-#include "z64.h"
-#include "z64save.h"
-#include "macros.h"
-#include "functions.h"
 extern PlayState* gPlayState;
 extern SaveContext gSaveContext;
+#include "macros.h"
+#include "functions.h"
 }
 
 #define CVAR_BOW_RETICLE_NAME CVAR_ENHANCEMENT("BowReticle")
@@ -45,6 +43,7 @@ void RegisterAdditionalReticles() {
              player->heldItemAction == PLAYER_IA_SLINGSHOT)) {
             if (heldActor != NULL) {
                 MtxF sp44;
+                s32 pad;
 
                 Matrix_RotateZYX(0, -15216, -17496, MTXMODE_APPLY);
                 Matrix_Get(&sp44);

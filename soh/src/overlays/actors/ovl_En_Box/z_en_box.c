@@ -115,7 +115,8 @@ void EnBox_Init(Actor* thisx, PlayState* play2) {
     f32 endFrame;
 
     animFrameStart = 0.0f;
-    anim = sAnimations[((void)0, gSaveContext.linkAge)];
+    // FD (2026-07-12): clamp Fierce Deity (LINK_AGE_DEITY=2) to the adult chest anim (sAnimations is [adult,child]).
+    anim = sAnimations[(gSaveContext.linkAge > LINK_AGE_CHILD) ? LINK_AGE_ADULT : gSaveContext.linkAge];
     colHeader = NULL;
     endFrame = Animation_GetLastFrame(anim);
     Actor_ProcessInitChain(&this->dyna.actor, sInitChain);
@@ -290,12 +291,12 @@ void EnBox_FallOnSwitchFlag(EnBox* this, PlayState* play) {
     s32 treasureFlag = this->dyna.actor.params & 0x1F;
 
     if (treasureFlag >= ENBOX_TREASURE_FLAG_UNK_MIN && treasureFlag < ENBOX_TREASURE_FLAG_UNK_MAX) {
-        Actor_SetClosestSecretDistance(&this->dyna.actor, play);
+        func_8002F5F0(&this->dyna.actor, play);
     }
 
     if (this->unk_1A8 >= 0) {
         EnBox_SetupAction(this, EnBox_Fall);
-        this->subCamId = OnePointCutscene_Init(play, 4500, 9999, &this->dyna.actor, CAM_ID_MAIN);
+        this->subCamId = OnePointCutscene_Init(play, 4500, 9999, &this->dyna.actor, MAIN_CAM);
         func_8003EC50(play, &play->colCtx.dyna, this->dyna.bgId);
     } else if (this->unk_1A8 >= -11) {
         this->unk_1A8++;
@@ -310,7 +311,7 @@ void func_809C9700(EnBox* this, PlayState* play) {
     Player* player = GET_PLAYER(play);
 
     if (treasureFlag >= ENBOX_TREASURE_FLAG_UNK_MIN && treasureFlag < ENBOX_TREASURE_FLAG_UNK_MAX) {
-        Actor_SetClosestSecretDistance(&this->dyna.actor, play);
+        func_8002F5F0(&this->dyna.actor, play);
     }
 
     if (Math3D_Vec3fDistSq(&this->dyna.actor.world.pos, &player->actor.world.pos) > 22500.0f) {
@@ -346,7 +347,7 @@ void EnBox_AppearOnSwitchFlag(EnBox* this, PlayState* play) {
     s32 treasureFlag = this->dyna.actor.params & 0x1F;
 
     if (treasureFlag >= ENBOX_TREASURE_FLAG_UNK_MIN && treasureFlag < ENBOX_TREASURE_FLAG_UNK_MAX) {
-        Actor_SetClosestSecretDistance(&this->dyna.actor, play);
+        func_8002F5F0(&this->dyna.actor, play);
     }
 
     if (Flags_GetSwitch(play, this->switchFlag)) {
@@ -360,7 +361,7 @@ void EnBox_AppearOnRoomClear(EnBox* this, PlayState* play) {
     s32 treasureFlag = this->dyna.actor.params & 0x1F;
 
     if (treasureFlag >= ENBOX_TREASURE_FLAG_UNK_MIN && treasureFlag < ENBOX_TREASURE_FLAG_UNK_MAX) {
-        Actor_SetClosestSecretDistance(&this->dyna.actor, play);
+        func_8002F5F0(&this->dyna.actor, play);
     }
 
     if (Flags_GetTempClear(play, this->dyna.actor.room) && !Player_InCsMode(play)) {
@@ -420,7 +421,10 @@ void EnBox_WaitOpen(EnBox* this, PlayState* play) {
     this->alpha = 255;
     this->movementFlags |= ENBOX_MOVE_IMMOBILE;
     if (this->unk_1F4 != 0) { // unk_1F4 is modified by player code
-        linkAge = gSaveContext.linkAge;
+        // FD (2026-07-12) ★CHEST CRASH FIX: sAnimations is [adult,child] x [open,close] (4 entries). Fierce Deity's
+        // linkAge is LINK_AGE_DEITY(2), so (unk_1F4<0 ? 2:0) + 2 = 2 or 4 -> index 4 is OUT OF BOUNDS -> crash on
+        // opening a chest as FD. The chest-lid anim has no deity variant; clamp the deity form to the adult anim.
+        linkAge = (gSaveContext.linkAge > LINK_AGE_CHILD) ? LINK_AGE_ADULT : gSaveContext.linkAge;
         anim = sAnimations[(this->unk_1F4 < 0 ? 2 : 0) + linkAge];
         frameCount = Animation_GetLastFrame(anim);
         Animation_Change(&this->skelanime, anim, 1.5f, 0, frameCount, ANIMMODE_ONCE, 0.0f);
@@ -510,7 +514,7 @@ void EnBox_SpawnIceSmoke(EnBox* this, PlayState* play) {
     f32 f0;
 
     this->iceSmokeTimer++;
-    Actor_PlaySfx_Flagged(&this->dyna.actor, NA_SE_EN_MIMICK_BREATH - SFX_FLAG);
+    func_8002F974(&this->dyna.actor, NA_SE_EN_MIMICK_BREATH - SFX_FLAG);
     if (Rand_ZeroOne() < 0.3f) {
         f0 = 2.0f * Rand_ZeroOne() - 1.0f;
         pos = this->dyna.actor.world.pos;

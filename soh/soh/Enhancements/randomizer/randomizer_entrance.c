@@ -579,7 +579,7 @@ void Entrance_HandleEponaState(void) {
         player->actor.parent = NULL;
         AREG(6) = 0;
         gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0]; //"temp B"
-        GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+        Interface_RandoRestoreSwordless();
     }
 }
 
@@ -590,7 +590,7 @@ void Entrance_OverrideWeatherState() {
     gPlayState->envCtx.gloomySkyMode = 0;
 
     // Weather only applyies to adult link
-    if (LINK_IS_CHILD || gSaveContext.sceneLayer >= 4) {
+    if (LINK_IS_CHILD || gSaveContext.sceneSetupIndex >= 4) {
         return;
     }
 

@@ -103,6 +103,21 @@ static constexpr std::array<const uint32_t, 21> goodCrcs = {
     0x02CD974C, // GC MQ NTSC JP
 };
 
+// FD (2026-07-16): Majora's Mask ROM identification, used only when mIsMM is set (fd.o2r generation).
+// Header CRCs (word[4]) and whole-ROM CRC32C values, matching 2 Ship 2 Harkinian's extractor.
+static constexpr uint32_t MM_US_10 = 0x5354631C; // header CRC, MM US 1.0 (N64)
+static constexpr uint32_t MM_US_GC = 0xB443EB08; // header CRC, MM US (GameCube)
+static constexpr uint32_t MM_US_10_ROMCRC = 0x96F49400; // CRC32C of whole 32MB N64 ROM
+static constexpr uint32_t MM_US_GC_ROMCRC = 0xBB434787; // CRC32C of GC ROM
+static const std::unordered_map<uint32_t, const char*> mmVerMap = {
+    { MM_US_10, "MM NTSC N64 US 1.0" },
+    { MM_US_GC, "MM NTSC Gamecube US" },
+};
+static constexpr std::array<const uint32_t, 2> mmGoodCrcs = {
+    MM_US_10_ROMCRC,
+    MM_US_GC_ROMCRC,
+};
+
 enum class ButtonId : int {
     YES,
     NO,
@@ -339,6 +354,17 @@ size_t Extractor::GetCurRomSize() const {
 }
 
 bool Extractor::ValidateAndFixRom() {
+    // FD (2026-07-16): in MM mode, match against the Majora's Mask ROM CRCs instead of OoT's.
+    if (mIsMM) {
+        const uint32_t actualCrc = CRC32C(mRomData.get(), mCurRomSize);
+        for (const uint32_t crc : mmGoodCrcs) {
+            if (actualCrc == crc) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // The MQ debug rom sometimes has the header patched to look like a US rom. Change it back
     if (GetRomVerCrc() == OOT_PAL_GC_MQ_DBG) {
         mRomData[0x3E] = 'P';
@@ -559,6 +585,10 @@ bool Extractor::Run(std::string searchPath, RomSearchMode searchMode) {
 }
 
 bool Extractor::IsMasterQuest() const {
+    // FD (2026-07-16): Majora's Mask has no Master Quest variant.
+    if (mIsMM) {
+        return false;
+    }
     switch (GetRomVerCrc()) {
         case OOT_PAL_MQ:
         case OOT_PAL_GC_MQ_DBG:
@@ -582,6 +612,18 @@ bool Extractor::IsMasterQuest() const {
 }
 
 const char* Extractor::GetZapdVerStr() const {
+    // FD (2026-07-16): MM version folders under assets/xml/ (matches 2 Ship's GetZapdVerStr).
+    if (mIsMM) {
+        switch (GetRomVerCrc()) {
+            case MM_US_10:
+                return "N64_US";
+            case MM_US_GC:
+                return "GC_US";
+            default:
+                UNREACHABLE;
+                break;
+        }
+    }
     switch (GetRomVerCrc()) {
         case OOT_PAL_GC:
             return "GC_NMQ_PAL_F";
@@ -699,6 +741,76 @@ bool Extractor::CallZapd(std::string installPath, std::string exportdir, std::at
     std::filesystem::remove_all(tempdir);
 
     return false;
+}
+
+// FD (2026-07-16): MM equivalent of CallZapd. Runs ZAPD against the (already-validated) MM ROM using the
+// curated MM XML subset under assets/xml/<ver>, producing a full temp extract archive ("fd_full.o2r").
+// Returns its absolute path, or "" on failure. The caller filters this down to the FD subset and deletes it.
+std::string Extractor::ExtractCuratedToTemp(std::string installPath, std::atomic<size_t>* extractCount,
+                                            std::atomic<size_t>* totalExtract) {
+    constexpr int argc = 22;
+    char xmlPath[1024];
+    char confPath[1024];
+    char portVersion[18];
+    std::array<const char*, argc> argv;
+    const char* version = GetZapdVerStr(); // "N64_US" / "GC_US"
+    const char* otrFile = "fd_full.o2r";
+
+    std::string romPath = std::filesystem::absolute(mCurrentRomPath).string();
+    installPath = std::filesystem::absolute(installPath).string();
+    std::string tempdir = Mkdtemp();
+    std::string curdir = std::filesystem::current_path().string();
+#ifdef _WIN32
+    std::filesystem::copy(installPath + "/assets", tempdir + "/assets",
+                          std::filesystem::copy_options::recursive | std::filesystem::copy_options::update_existing);
+#else
+    std::filesystem::create_symlink(installPath + "/assets", tempdir + "/assets");
+#endif
+
+    std::filesystem::current_path(tempdir);
+
+    snprintf(xmlPath, 1024, "assets/xml/%s", version);
+    snprintf(confPath, 1024, "assets/Config_%s.xml", version);
+    snprintf(portVersion, 18, "%d.%d.%d", gBuildVersionMajor, gBuildVersionMinor, gBuildVersionPatch);
+
+    argv[0] = "ZAPD";
+    argv[1] = "ed";
+    argv[2] = "-i";
+    argv[3] = xmlPath;
+    argv[4] = "-b";
+    argv[5] = romPath.c_str();
+    argv[6] = "-fl";
+    argv[7] = "assets/filelists";
+    argv[8] = "-gsf";
+    argv[9] = "0";
+    argv[10] = "-rconf";
+    argv[11] = confPath;
+    argv[12] = "-se";
+    argv[13] = "OTR";
+    argv[14] = "--otrfile";
+    argv[15] = otrFile;
+    argv[16] = "--portVer";
+    argv[17] = portVersion;
+    argv[18] = "-o";
+    argv[19] = "placeholder";
+    argv[20] = "-osf";
+    argv[21] = "placeholder";
+
+    zapd_report(argc, (char**)argv.data(), extractCount, totalExtract);
+
+    std::string produced = tempdir + "/" + otrFile;
+    std::string result;
+    if (std::filesystem::exists(produced)) {
+        // Move it out of the working tempdir (which we delete) into a stable temp file.
+        result = (std::filesystem::temp_directory_path() / "fd_full_extract.o2r").string();
+        std::error_code ec;
+        std::filesystem::remove(result, ec);
+        std::filesystem::copy(produced, result, std::filesystem::copy_options::overwrite_existing);
+    }
+
+    std::filesystem::current_path(curdir);
+    std::filesystem::remove_all(tempdir);
+    return result;
 }
 
 static void MessageboxWorker() {

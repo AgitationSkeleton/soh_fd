@@ -34,6 +34,7 @@ void Randomizer_DrawBombchuBagInLogic(PlayState* play, GetItemEntry* getItemEntr
 void Randomizer_DrawBombchuBag(PlayState* play, GetItemEntry* getItemEntry);
 void Randomizer_DrawOverworldKey(PlayState* play, GetItemEntry* getItemEntry);
 void Randomizer_DrawRocsFeather(PlayState* play, GetItemEntry* getItemEntry);
+void FierceDeity_DrawGiMask(PlayState* play, GetItemEntry* getItemEntry); // FD (2026-07-12): rando get-item + freestanding model
 
 #define GET_ITEM_MYSTERY                                                                                 \
     {                                                                                                    \

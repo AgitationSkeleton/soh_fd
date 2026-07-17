@@ -4,7 +4,6 @@
 
 #include <thread>
 #include <memory>
-#include <mutex>
 #include <vector>
 
 #include "soh/Network/Network.h"

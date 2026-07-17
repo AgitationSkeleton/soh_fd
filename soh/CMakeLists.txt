@@ -135,6 +135,7 @@ source_group("include" FILES ${Header_Files__include})
 file(GLOB_RECURSE soh__ RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "soh/*.c" "soh/*.cpp" "soh/*.h" "soh/*.hpp")
 
 # Add specific files that don't match the pattern
+list(APPEND soh__ ${CMAKE_CURRENT_SOURCE_DIR}/soh/Enhancements/savestates_extern.inc)
 list(APPEND soh__ ${CMAKE_CURRENT_SOURCE_DIR}/soh/Enhancements/speechsynthesizer/DarwinSpeechSynthesizer.mm)
 
 # Create source groups that match the real file directory paths
@@ -150,6 +151,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     set_source_files_properties(soh/Enhancements/tts/tts.cpp PROPERTIES COMPILE_FLAGS "/utf-8")
     set_source_files_properties(soh/Enhancements/custom-message/CustomMessageManager.cpp PROPERTIES COMPILE_FLAGS "/utf-8")
     set_source_files_properties(soh/Enhancements/custom-message/CustomMessageManager.h PROPERTIES COMPILE_FLAGS "/utf-8")
+endif()
+
+# FD (2026-07-13): this fork ships with Anchor/Sail online support ON by default -- SDL2_net is provided via vcpkg, so
+# BUILD_REMOTE_CONTROL is assumed enabled unless a build explicitly passes -DBUILD_REMOTE_CONTROL=OFF. If SDL2_net is
+# somehow missing, the find_package check below still auto-disables it gracefully.
+if (NOT DEFINED BUILD_REMOTE_CONTROL)
+    set(BUILD_REMOTE_CONTROL ON)
+endif()
+
+# handle Network removals
+if (!BUILD_REMOTE_CONTROL)
+    list(FILTER soh__ EXCLUDE REGEX "soh/Enhancements/crowd-control/")
 endif()
 
 # handle speechsynthesizer removals
@@ -302,12 +315,15 @@ FetchContent_MakeAvailable(dr_libs)
 find_package(SDL2)
 set(SDL2-INCLUDE ${SDL2_INCLUDE_DIRS})
 
-find_package(SDL2_net)
+if (BUILD_REMOTE_CONTROL)
+    find_package(SDL2_net)
 
-if(NOT SDL2_net_FOUND)
-    message(STATUS "SDL2_net not found (it's possible the version installed is too old).")
-else()
-    set(SDL2-NET-INCLUDE ${SDL_NET_INCLUDE_DIRS})
+    if(NOT SDL2_net_FOUND)
+        message(STATUS "SDL2_net not found (it's possible the version installed is too old). Disabling BUILD_REMOTE_CONTROL.")
+        set(BUILD_REMOTE_CONTROL 0)
+    else()
+        set(SDL2-NET-INCLUDE ${SDL_NET_INCLUDE_DIRS})
+    endif()
 endif()
 
 if (ESPEAK)
@@ -341,6 +357,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
             "$<$<CONFIG:Release>:"
                 "NDEBUG;"
             ">"
+            "$<$<BOOL:${BUILD_REMOTE_CONTROL}>:ENABLE_REMOTE_CONTROL>"
             "INCLUDE_GAME_PRINTF;"
             "F3DEX_GBI_2"
             "UNICODE;"
@@ -397,6 +414,7 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang|AppleClang")
             "NDEBUG;"
         ">"
         "F3DEX_GBI_2;"
+        "$<$<BOOL:${BUILD_REMOTE_CONTROL}>:ENABLE_REMOTE_CONTROL>;"
         "_CONSOLE;"
         "_CRT_SECURE_NO_WARNINGS;"
         "ENABLE_OPENGL;"
@@ -420,7 +438,6 @@ if(MSVC)
                 /Gy;
             >
             /W3;
-            /WX;
             /bigobj;
             /sdl-;
             /permissive-;
@@ -443,7 +460,6 @@ if(MSVC)
             /MP;
             /sdl-;
             /W3;
-            /WX;
             ${DEFAULT_CXX_DEBUG_INFORMATION_FORMAT};
             ${DEFAULT_CXX_EXCEPTION_HANDLING}
         )
@@ -600,6 +616,8 @@ if (CMAKE_GENERATOR MATCHES "Visual Studio")
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/extractor ${CMAKE_BINARY_DIR}/soh/assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/xml ${CMAKE_BINARY_DIR}/soh/assets/xml
+    # FD (2026-07-16): original (non-Nintendo) resources merged into fd.o2r at generation time.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/fd_bundled ${CMAKE_BINARY_DIR}/soh/assets/fd_bundled
     )
 endif()
 if(NOT CMAKE_SYSTEM_NAME MATCHES "NintendoSwitch|CafeOS")
@@ -609,6 +627,8 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "NintendoSwitch|CafeOS")
         COMMENT "Copying asset xmls..."
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/extractor $<TARGET_FILE_DIR:soh>/assets
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/xml $<TARGET_FILE_DIR:soh>/assets/xml
+        # FD (2026-07-16): original (non-Nintendo) resources merged into fd.o2r at generation time.
+        COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/soh/assets/fd_bundled $<TARGET_FILE_DIR:soh>/assets/fd_bundled
         COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:soh>/assets/symbols
     #    COMMAND ${VS_COPY_ASSETS_CMD}
     )
@@ -643,7 +663,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
             "glu32;"
             "SDL2::SDL2;"
             "SDL2::SDL2main;"
-            "SDL2_net::SDL2_net-static"
+            "$<$<BOOL:${BUILD_REMOTE_CONTROL}>:SDL2_net::SDL2_net-static>"
             "glfw;"
             "winmm;"
             "imm32;"
@@ -709,7 +729,7 @@ else()
         "Vorbis::vorbisfile"
         "Opus::opus"
         "Opusfile::Opusfile"
-        "SDL2_net::SDL2_net"
+        "$<$<BOOL:${BUILD_REMOTE_CONTROL}>:SDL2_net::SDL2_net>"
         ${CMAKE_DL_LIBS}
         Threads::Threads
     )

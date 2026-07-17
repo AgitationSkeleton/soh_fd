@@ -1,117 +1,67 @@
-![Ship of Harkinian](docs/shiptitle.darkmode.png#gh-dark-mode-only)
-![Ship of Harkinian](docs/shiptitle.lightmode.png#gh-light-mode-only)
+# Ship of Harkinian — Fierce Deity Fork
 
-## Website
+A fork of [Ship of Harkinian](https://github.com/HarbourMasters/Shipwright) (the PC port of *The Legend of
+Zelda: Ocarina of Time*) that adds a fully-playable **Fierce Deity transformation mask** and a transformation
+system, re-created from Aegiker's OoT Fierce Deity romhack and made behavior-accurate to *Majora's Mask* by
+porting mechanics from the MM decompilation and 2 Ship 2 Harkinian.
 
-Official Website: https://www.shipofharkinian.com/
+> This is a **source + code** repository. It does **not** contain any game assets. Ocarina of Time and Majora's
+> Mask assets belong to Nintendo — you must supply your own ROMs (see **Assets & `fd.o2r`** below).
 
-## Discord
+## Features
 
-Official Discord: https://discord.com/invite/shipofharkinian
+- **Fierce Deity's Mask** — obtain, equip to a C-button, and transform with the full MM-style animated cutscene
+  (mask-on, scream, white flash), the Fierce Deity model, sword, sword beams, movement (MM gait), and the MM
+  usability rules (boss lairs + fishing hole unless "FD Usable Anywhere" is on; auto-revert safeguards).
+- A **Transformation Masks** menu of toggles/cheats (FD-usable-anywhere, ocarina, item-unrestrict, strength, …).
+- A **Bonus Settings** menu with optional Majora's-Mask flavor: **MM Jump Flips** (per-form regular/front-flip/
+  somersault pool with the roll whoosh) and **MM Young Link Hookshot Sound** (child grapple voice).
+- **Anchor co-op** integration for the Fierce Deity form (mask sync, remote transform SFX/visuals, correct
+  per-form scale/model on other players' puppets).
+- **Randomizer** support for the Fierce Deity's Mask.
 
-If you're having any trouble after reading through this `README`, feel free to ask for help in the Support text channels. Please keep in mind that we do not condone piracy.
+## Assets & `fd.o2r` (important)
 
-# Quick Start
+The Fierce Deity form needs **`fd.o2r`**, an asset archive containing the FD model, masks, animations, the
+MM voice grunts / hookshot sounds, and related resources. All of the Majora's-Mask content is **derived from
+your own Majora's Mask ROM at first launch** — exactly like Ship of Harkinian never ships Nintendo's `oot.o2r`
+and instead generates it from your Ocarina of Time ROM. **No Nintendo assets are distributed in this
+repository, and none are ever placed in the repo during generation.**
 
-The Ship does not include any copyrighted assets.  You are required to provide a supported copy of the game.
+**How it works.** On first launch, after the usual "generate `oot.o2r`?" prompt, the fork shows a second
+prompt for your Majora's Mask ROM (US, N64 or GameCube) and builds `fd.o2r` locally. The build runs the
+bundled ZAPD asset extractor over the MM ROM using a curated subset of the MM asset XMLs, then decodes the
+MM font-0 voice/whip samples (VADPCM) into the exact clips the form uses. The result is byte-accurate to a
+full MM extraction.
 
-### 1. Verify your ROM dump
-You can verify you have dumped a supported copy of the game by using the compatibility checker at https://ship.equipment/. If you'd prefer to manually validate your ROM dump, you can cross-reference its `sha1` hash with the hashes [here](docs/supportedHashes.json).
+**What *is* bundled** are only original, non-Nintendo works, credited below: **Aegiker's** authored
+transformation sounds (created for the OoT Fierce Deity hack, not present in Majora's Mask), the hand-authored
+transform "swirl" effect, the community **MM_Jumps** flip animations, and a few hand-patched display lists.
+Everything sourced from Majora's Mask is generated from your ROM, never shipped.
 
-### 2. Download The Ship of Harkinian from [Releases](https://github.com/HarbourMasters/Shipwright/releases)
+## Building
 
-### 3. Launch the Game!
-#### Windows
-* Extract the zip
-* Launch `soh.exe`
+Follow the standard Ship of Harkinian build instructions (see the SoH docs / `docs/`), which build `soh` for
+Windows and Linux. On first launch, provide your Ocarina of Time ROM (to generate `oot.o2r`) and your Majora's
+Mask ROM (to generate `fd.o2r`) when prompted.
 
-#### Linux
-* Place your supported copy of the game in the same folder as the appimage.
-* Execute `soh.appimage`.  You may have to `chmod +x` the appimage via terminal.
+## Credits & acknowledgements
 
-#### macOS
-* Run `soh.app`. When prompted, select your supported copy of the game.
-* You should see a notification saying `Processing OTR`, then, once the process is complete, you should get a notification saying `OTR Successfully Generated`, then the game should start.
+This fork stands entirely on other people's work. Enormous thanks to:
 
-#### Nintendo Switch
-* Run one of the PC releases to generate an `oot.o2r` and/or `oot-mq.o2r` file. After launching the game on PC, you will be able to find these files in the same directory as `soh.exe` or `soh.appimage`. On macOS, these files can be found in `/Users/<username>/Library/Application Support/com.shipofharkinian.soh/`
-* Copy the files to your sd card
-```
-sdcard
-└── switch
-    └── soh
-        ├── oot-mq.o2r
-        ├── oot.o2r
-        ├── soh.nro
-        └── soh.o2r
-```
-* Launch via Atmosphere's `Game+R` launcher method.
+- **[Ship of Harkinian](https://github.com/HarbourMasters/Shipwright) & [libultraship](https://github.com/HarbourMasters/libultraship)** — HarbourMasters and the SoH contributors. This fork is built directly on their PC port and runtime; all of their code is the foundation here.
+- **[2 Ship 2 Harkinian](https://github.com/HarbourMasters/2ship2harkinian)** — the SoH-engine Majora's Mask port. Direct source of behavior and reference for this fork: the per-form item-usability table (`gPlayerFormItemRestrictions`), the transform-mask sound behavior, the "Hyrule Warriors Styled Link" reference, and many MM-accurate Fierce Deity mechanics.
+- **Aegiker** — creator of the Ocarina of Time **Fierce Deity / "Transformation Masks" romhack** and the open-source Fierce Deity work that this fork reverse-engineers and re-ports. The FD form, its behaviors, and much of the transform flow originate from that hack.
+- **[Ocarina of Time](https://github.com/zeldaret/oot) & [Majora's Mask](https://github.com/zeldaret/mm) decompilations (zeldaret)** — the decompiled sources SoH is built from and the authoritative reference for the MM behaviors ported here.
+- **MM_Jumps (ModLoader64 addon)** — the Majora's Mask front-flip and somersault jump animations used by the "MM Jump Flips" feature.
+- **ModLoader64 / Z64Online (OotOnline)** — reference for the planned per-player model-sync design.
+- **Nintendo** — *Ocarina of Time* and *Majora's Mask*. All game assets are theirs; none are included here. Provide your own ROMs.
+- **AgitationSkeleton** — this fork's author/maintainer.
 
-### 4. Play!
+If your work is used here and you are not credited, please open an issue — it's an oversight, not intent.
 
-Congratulations, you are now sailing with the Ship of Harkinian! Have fun!
+## License
 
-# Configuration
-
-### Default keyboard configuration
-| N64 | A | B | Z | Start | Analog stick | C buttons | D-Pad |
-| - | - | - | - | - | - | - | - |
-| Keyboard | X | C | Z | Space | WASD | Arrow keys | TFGH |
-
-### Other shortcuts
-| Keys | Action |
-| - | - |
-| ESC | Toggle menu |
-| F2 | Toggle capture mouse input |
-| F5 | Save state |
-| F6 | Change state |
-| F7 | Load state |
-| F9 | Toggle Text-to-Speech (Windows and Mac only) |
-| F11 | Fullscreen |
-| Tab | Toggle Alternate assets |
-| Ctrl+R | Reset |
-
-# Project Overview
-Ship of Harkinian (SOH) is built atop a custom library dubbed libultraship (LUS). Back in the N64 days, there was an SDK distributed to developers named libultra; LUS is designed to mimic the functionality of libultra on modern hardware. In addition, we are dependant on the source code provided by the OOT decompilation project.
-
-In order for the game to function, you will require a **legally acquired** ROM for Ocarina of Time. Click [here](https://ship.equipment/) to check the compatibility of your specific rom. Any copyrighted assets are extracted from the ROM and reformatted as a .o2r archive file which the code uses.
-
-### Graphics Backends
-Currently, there are three rendering APIs supported: DirectX11 (Windows), OpenGL (all platforms), and Metal (MacOS). You can change which API to use in the `Settings` menu of the menubar, which requires a restart.  If you're having an issue with crashing, you can change the API in the `shipofharkinian.json` file by finding the line `gfxbackend:""` and changing the value to `sdl` for OpenGL. DirectX 11 is the default on Windows.
-
-# Custom Assets
-
-Custom assets are packed in `.otr` archive files. To use custom assets, place them in the `mods` folder.
-
-If you're interested in creating and/or packing your own custom asset `.otr` files, check out the following tools:
-* [**retro - OTR generator**](https://github.com/HarbourMasters64/retro)
-* [**fast64 - Blender plugin**](https://github.com/HarbourMasters/fast64)
-
-# Development
-### Building
-
-If you want to manually compile SoH, please consult the [building instructions](docs/BUILDING.md).
-
-### Playtesting
-If you want to playtest a continuous integration build, you can find them at the links below. Keep in mind that these are for playtesting only, and you will likely encounter bugs and possibly crashes. 
-
-* [Windows](https://nightly.link/HarbourMasters/Shipwright/workflows/generate-builds/develop/soh-windows.zip)
-* [macOS](https://nightly.link/HarbourMasters/Shipwright/workflows/generate-builds/develop/soh-mac.zip)
-* [Linux](https://nightly.link/HarbourMasters/Shipwright/workflows/generate-builds/develop/soh-linux.zip)
-
-### Further Reading
-More detailed documentation can be found in the 'docs' directory, including the aforementioned [building instructions](docs/BUILDING.md).
-
-* [Credits](docs/CREDITS.md)
-* [Custom Music](docs/CUSTOM_MUSIC.md)
-* [Formatting](docs/FORMATTING.md)
-* [Controller Mapping](docs/GAME_CONTROLLER_DB.md)
-* [Modding](docs/MODDING.md)
-* [Versioning](docs/VERSIONING.md)
-
-<a href="https://github.com/Kenix3/libultraship/">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/poweredbylus.darkmode.png">
-    <img alt="Powered by libultraship" src="./docs/poweredbylus.lightmode.png">
-  </picture>
-</a>
+The **code** in this fork inherits Ship of Harkinian's license (see `LICENSE`). It does **not** grant any rights
+to Nintendo's assets or to third-party assets referenced by the build scripts; those remain the property of
+their respective owners and are never distributed here.

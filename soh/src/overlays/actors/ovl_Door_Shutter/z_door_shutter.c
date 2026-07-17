@@ -402,23 +402,22 @@ void DoorShutter_Idle(DoorShutter* this, PlayState* play) {
 
         if (doorDirection != 0) {
             Player* player = GET_PLAYER(play);
-            if (GameInteractor_Should(VB_JABU_PREVENT_RUTO_REENTER_BIGOCTO, true, player, &this->dyna.actor)) {
-                if (this->unlockTimer != 0) {
-                    if (this->doorType == SHUTTER_BOSS) {
-                        if (!CHECK_DUNGEON_ITEM(DUNGEON_KEY_BOSS, gSaveContext.mapIndex)) {
-                            player->naviTextId = -0x204;
-                            return;
-                        }
-                    } else if (gSaveContext.inventory.dungeonKeys[gSaveContext.mapIndex] <= 0) {
-                        player->naviTextId = -0x203;
+
+            if (this->unlockTimer != 0) {
+                if (this->doorType == SHUTTER_BOSS) {
+                    if (!CHECK_DUNGEON_ITEM(DUNGEON_KEY_BOSS, gSaveContext.mapIndex)) {
+                        player->naviTextId = -0x204;
                         return;
                     }
-                    player->doorTimer = 10;
+                } else if (gSaveContext.inventory.dungeonKeys[gSaveContext.mapIndex] <= 0) {
+                    player->naviTextId = -0x203;
+                    return;
                 }
-                player->doorType = PLAYER_DOORTYPE_SLIDING;
-                player->doorDirection = doorDirection;
-                player->doorActor = &this->dyna.actor;
+                player->doorTimer = 10;
             }
+            player->doorType = PLAYER_DOORTYPE_SLIDING;
+            player->doorDirection = doorDirection;
+            player->doorActor = &this->dyna.actor;
         }
     }
 }
@@ -435,8 +434,8 @@ void DoorShutter_InitOpeningDoorCam(DoorShutter* this, PlayState* play) {
         DoorShutter_SetupAction(this, DoorShutter_Open);
         this->gfxType = sp38;
         this->barsClosedAmount = 0.0f;
-        Camera_ChangeDoorCam(play->cameraPtrs[CAM_ID_MAIN], &this->dyna.actor, player->cv.slidingDoorBgCamIndex, 0.0f,
-                             12, sp34, 10);
+        Camera_ChangeDoorCam(play->cameraPtrs[MAIN_CAM], &this->dyna.actor, player->cv.slidingDoorBgCamIndex, 0.0f, 12,
+                             sp34, 10);
     }
 }
 
@@ -567,9 +566,9 @@ void DoorShutter_SetupClosed(DoorShutter* this, PlayState* play) {
 
             play->roomCtx.curRoom = play->roomCtx.prevRoom;
             play->roomCtx.prevRoom = tempRoom;
-            play->roomCtx.activeBufPage ^= 1;
+            play->roomCtx.unk_30 ^= 1;
         }
-        Room_FinishRoomChange(play, &play->roomCtx);
+        func_80097534(play, &play->roomCtx);
         Play_SetupRespawnPoint(play, RESPAWN_MODE_DOWN, 0x0EFF);
     }
     this->unk_164 = 0;
@@ -597,7 +596,7 @@ void DoorShutter_Close(DoorShutter* this, PlayState* play) {
         Quake_SetSpeed(quakeId, -32536);
         Quake_SetQuakeValues(quakeId, 2, 0, 0, 0);
         Quake_SetCountdown(quakeId, 10);
-        Rumble_Request(this->dyna.actor.xyzDistToPlayerSq, 0xB4, 0x14, 0x64);
+        func_800AA000(this->dyna.actor.xyzDistToPlayerSq, 0xB4, 0x14, 0x64);
         DoorShutter_SetupClosed(this, play);
     }
 }

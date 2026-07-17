@@ -1,11 +1,13 @@
 #include "soh/Network/Anchor/Anchor.h"
 #include <nlohmann/json.hpp>
+#include <libultraship/libultraship.h>
 
 extern "C" {
+#include "macros.h"
 #include "functions.h"
 #include "variables.h"
 extern PlayState* gPlayState;
-extern f32 sRelativeOcarinaVolume;
+extern f32 D_80130F28;
 }
 
 /**
@@ -53,7 +55,7 @@ void Anchor::HandlePacket_OcarinaSfx(nlohmann::json payload) {
         Audio_QueueCmdS8(0x6 << 24 | SEQ_PLAYER_SFX << 16 | 0xD07, client.ocarinaBend - 1);
         Audio_QueueCmdS8(0x6 << 24 | SEQ_PLAYER_SFX << 16 | 0xD05, note);
         Audio_PlaySoundGeneral(NA_SE_OC_OCARINA, &client.player->actor.projectedPos, 4, &client.ocarinaModulator,
-                               &sRelativeOcarinaVolume, &gSfxDefaultReverb);
+                               &D_80130F28, &gSfxDefaultReverb);
     } else if ((client.ocarinaNote != 0xFF) && (note == 0xFF)) {
         Audio_StopSfxById(NA_SE_OC_OCARINA);
     }

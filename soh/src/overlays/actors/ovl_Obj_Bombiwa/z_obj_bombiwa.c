@@ -125,9 +125,21 @@ void ObjBombiwa_Break(ObjBombiwa* this, PlayState* play) {
 void ObjBombiwa_Update(Actor* thisx, PlayState* play) {
     ObjBombiwa* this = (ObjBombiwa*)thisx;
     s32 pad;
+    s32 acHit = (this->collider.base.acFlags & AC_HIT);
+
+    // FD (2026-07-12) "FD Beams Break Rocks" cheat -- FIXED. The old detection keyed off the beam carrying the
+    // DMG_HAMMER bits (0x40000040) + a DMG_SWORD_BEAM tag at bit 31, but the 0-damage fix in z_en_m_thunder.c
+    // retagged the beam's dmgFlags to a single clean DMG_SLASH_MASTER (0x200) -- SoH resolves damage from the
+    // HIGHEST set bit, so the composite MM value couldn't stay. That silently killed this check (0x200 has none of
+    // those bits), so the cheat did nothing. Detect the beam by its ACTOR instead: base.ac is the En_M_Thunder beam
+    // that dealt the AC hit (the bombiwa bumper mask 0x4FC1FFFE accepts the 0x200 beam, so AC_HIT is set). Real
+    // Megaton Hammer hits (0x40000040) still break unconditionally, exactly as in vanilla; the beam is cheat-gated.
+    s32 fdBeamBreak = acHit && (this->collider.base.ac != NULL) &&
+                      (this->collider.base.ac->id == ACTOR_EN_M_THUNDER) &&
+                      CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdBeamsBreakRocks"), 0);
 
     if ((func_80033684(play, &this->actor) != NULL) ||
-        ((this->collider.base.acFlags & AC_HIT) && (this->collider.info.acHitInfo->toucher.dmgFlags & 0x40000040))) {
+        (acHit && (this->collider.info.acHitInfo->toucher.dmgFlags & 0x40000040)) || fdBeamBreak) {
         ObjBombiwa_Break(this, play);
         Flags_SetSwitch(play, this->actor.params & 0x3F);
         SoundSource_PlaySfxAtFixedWorldPos(play, &this->actor.world.pos, 80, NA_SE_EV_WALL_BROKEN);

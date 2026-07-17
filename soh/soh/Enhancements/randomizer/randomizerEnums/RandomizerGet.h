@@ -323,6 +323,9 @@ RANDO_ENUM_ITEM(RG_ROCS_FEATHER)
 // Logic Only
 RANDO_ENUM_ITEM(RG_STICKS)
 RANDO_ENUM_ITEM(RG_NUTS)
+// FD (2026-07-13): moved here from after RG_ROCS_FEATHER so it no longer shifts the logic-only RG_STICKS/RG_NUTS.
+// Keep new RG entries appended before RG_MAX.
+RANDO_ENUM_ITEM(RG_FIERCE_DEITY_MASK)
 RANDO_ENUM_ITEM(RG_MAX)
 RANDO_ENUM_END(RandomizerGet)
 

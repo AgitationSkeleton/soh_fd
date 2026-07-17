@@ -2,6 +2,7 @@
 #define Z64PLAYER_H
 
 #include "z64actor.h"
+#include "z64light.h" // FD (2026-07-11): LightInfo/LightNode for the transform point-light glow (struct fields below)
 #include "alignment.h"
 #include "soh/Enhancements/item-tables/ItemTableTypes.h"
 
@@ -167,7 +168,8 @@ typedef enum PlayerItemAction {
     /* 0x40 */ PLAYER_IA_MASK_GERUDO,
     /* 0x41 */ PLAYER_IA_MASK_TRUTH,
     /* 0x42 */ PLAYER_IA_LENS_OF_TRUTH,
-    /* 0x43 */ PLAYER_IA_MAX
+    /* 0x43 */ PLAYER_IA_MASK_DEITY, // Fierce Deity (aegiker RE->SoH port 2026-07-11)
+    /* 0x44 */ PLAYER_IA_MAX
 } PlayerItemAction;
 
 typedef enum PlayerLimb {
@@ -587,20 +589,20 @@ typedef enum PlayerStickDirection {
     /*  3 */ PLAYER_STICK_DIR_RIGHT
 } PlayerStickDirection;
 
-typedef enum PlayerKnockbackType {
+typedef enum {
     /* 0 */ PLAYER_KNOCKBACK_NONE, // No knockback
     /* 1 */ PLAYER_KNOCKBACK_SMALL, // A small hop, remains standing up
     /* 2 */ PLAYER_KNOCKBACK_LARGE, // Sent flying in the air and lands laying down on the floor
-    /* 3 */ PLAYER_KNOCKBACK_LARGE_ELECTRIFIED // Same as`PLAYER_KNOCKBACK_LARGE` with a shock effect
+    /* 3 */ PLAYER_KNOCKBACK_LARGE_SHOCK // Same as`PLAYER_KNOCKBACK_LARGE` with a shock effect
 } PlayerKnockbackType;
 
-typedef enum PlayerHitResponseType {
+typedef enum {
     /* 0 */ PLAYER_HIT_RESPONSE_NONE,
     /* 1 */ PLAYER_HIT_RESPONSE_KNOCKBACK_LARGE,
     /* 2 */ PLAYER_HIT_RESPONSE_KNOCKBACK_SMALL,
-    /* 3 */ PLAYER_HIT_RESPONSE_FROZEN,
-    /* 4 */ PLAYER_HIT_RESPONSE_ELECTRIFIED
-} PlayerHitResponseType;
+    /* 3 */ PLAYER_HIT_RESPONSE_ICE_TRAP,
+    /* 4 */ PLAYER_HIT_RESPONSE_ELECTRIC_SHOCK
+} PlayerDamageResponseType;
 
 typedef struct PlayerAgeProperties {
     /* 0x00 */ f32 ceilingCheckHeight;
@@ -741,6 +743,7 @@ typedef struct PendingFlag {
 #define PLAYER_STATE3_FORCE_PULL_OCARINA (1 << 5)
 #define PLAYER_STATE3_RESTORE_NAYRUS_LOVE (1 << 6) // Set by ocarina effects actors when destroyed to signal Nayru's Love may be restored (see `ACTOROVL_ALLOC_ABSOLUTE`)
 #define PLAYER_STATE3_FLYING_WITH_HOOKSHOT (1 << 7) // Flying in the air with the hookshot as it pulls Player toward its destination
+#define PLAYER_STATE3_TRANSFORMATION_MASK (1 << 8) // Fierce Deity: wearing the transformation mask on-face (aegiker RE->SoH 2026-07-11)
 
 typedef void (*PlayerActionFunc)(struct Player*, struct PlayState*);
 typedef s32 (*UpperActionFunc)(struct Player*, struct PlayState*);
@@ -836,7 +839,12 @@ typedef struct Player {
     /* 0x0688 */ Actor* boomerangActor;
     /* 0x068C */ Actor* naviActor;
     /* 0x0690 */ s16 naviTextId;
-    /* 0x0692 */ u8 stateFlags3;
+    /* 0x0692 */ u16 stateFlags3; // FD: WIDENED u8->u16. The added PLAYER_STATE3_TRANSFORMATION_MASK
+                                  // (1<<8) does NOT fit in a u8 -> `|= 0x100` truncated to a no-op and `& 0x100`
+                                  // was always 0, so every transform-mask/vortex draw gated on it was dead code.
+                                  // Native SoH build has no hardcoded Player offsets and Player isn't serialized,
+                                  // so the layout shift is safe. All stateFlags3 uses are named-bit |=/&=/& ops
+                                  // (audited) -> bits 0-7 behavior unchanged.
     /* 0x0693 */ s8 exchangeItemId;
     /* 0x0694 */ Actor* talkActor; // Actor offering to talk, or currently talking to, depending on context
     /* 0x0698 */ f32 talkActorDistance; // xz distance away from `talkActor`
@@ -951,8 +959,23 @@ typedef struct Player {
     // #region SOH [Enhancements]
     // Upstream TODO: Rename this to make it more obvious it is apart of an enhancement
     /*        */ u8 boomerangQuickRecall; // Has the player pressed the boomerang button while it's in the air still?
+    /*        */ u8 ivanFloating;
     /*        */ u8 ivanDamageMultiplier;
     // #endregion
-} Player; // size = 0xA94
+    // #region SOH [Fierce Deity] aegiker RE->SoH port 2026-07-11 (appended at tail for offset stability)
+    /*        */ s16 naviWarning;
+    /*        */ u8 lastItem;              // last B-button item, for FD sword-select in limb draw
+    /*        */ u8 transformTargetForm;   // linkAge the pending transform commits to
+    /*        */ u8 transformPreviousForm; // linkAge before the transform
+    /*        */ s8 transformEventTimer1;
+    /*        */ s16 transformEventTimer2;
+    /*        */ f32 transformMatrixModifiers[6]; // on-face mask matrix params (cutscene, asset-gated)
+    // FD (2026-07-11) Task 1: colored point-light glow for the mask-transform "blue swirl" (RE Player struct
+    // lightInfo/lightNode; RE Player_Init ~11895 / Player_Destroy). Registered in play->lightCtx for the whole
+    // life of the actor; Player_UpdateTransformLights repositions/recolors it only during the transform cutscene.
+    /*        */ LightInfo lightInfo;
+    /*        */ LightNode* lightNode;
+    // #endregion
+} Player; // size = 0xA94 (+ lightInfo/lightNode appended at tail)
 
 #endif

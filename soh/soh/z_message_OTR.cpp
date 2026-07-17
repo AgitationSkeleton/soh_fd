@@ -1,9 +1,12 @@
-#include <ship/Context.h>
-#include <ship/resource/ResourceManager.h>
+#include <libultraship/libultraship.h>
+#include "soh/resource/type/Scene.h"
 #include <ship/utils/StringHelper.h>
 #include "global.h"
+#include "vt.h"
 #include "soh/resource/type/Text.h"
 #include <message_data_static.h>
+#include "Enhancements/custom-message/CustomMessageManager.h"
+#include "Enhancements/custom-message/CustomMessageTypes.h"
 
 extern "C" MessageTableEntry* sNesMessageEntryTablePtr;
 extern "C" MessageTableEntry* sGerMessageEntryTablePtr;

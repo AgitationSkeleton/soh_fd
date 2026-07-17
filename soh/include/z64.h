@@ -1084,7 +1084,7 @@ typedef struct {
     /* 0x00 */ Room  curRoom;
     /* 0x14 */ Room  prevRoom;
     /* 0x28 */ void* bufPtrs[2];
-    /* 0x30 */ u8    activeBufPage;
+    /* 0x30 */ u8    unk_30;
     /* 0x31 */ s8    status;
     /* 0x34 */ void* unk_34;
     /* 0x38 */ DmaRequest dmaRequest;
@@ -1423,7 +1423,7 @@ typedef struct PlayState {
     /* 0x000B0 */ void* sceneSegment;
     /* 0x000B8 */ View view;
     /* 0x001E0 */ Camera mainCamera;
-    /* 0x0034C */ Camera subCameras[NUM_CAMS - CAM_ID_SUB_FIRST];
+    /* 0x0034C */ Camera subCameras[NUM_CAMS - SUBCAM_FIRST];
     /* 0x00790 */ Camera* cameraPtrs[NUM_CAMS];
     /* 0x007A0 */ s16 activeCamera;
     /* 0x007A2 */ s16 nextCamera;
@@ -1461,7 +1461,7 @@ typedef struct PlayState {
     /* 0x11DE0 */ Mtx* billboardMtx;
     /* 0x11DE4 */ u32 gameplayFrames;
     /* 0x11DE8 */ u8 linkAgeOnLoad;
-    /* 0x11DE9 */ u8 haltAllActors;
+    /* 0x11DE9 */ u8 unk_11DE9;
     /* 0x11DEA */ u8 curSpawn;
     /* 0x11DEB */ u8 numSetupActors;
     /* 0x11DEC */ u8 numRooms;
@@ -1477,7 +1477,7 @@ typedef struct PlayState {
     /* 0x11E14 */ u8 skyboxId;
     /* 0x11E15 */ s8 transitionTrigger; // "fade_direction"
     /* 0x11E16 */ s16 unk_11E16;
-    /* 0x11E18 */ s16 bgCoverAlpha;
+    /* 0x11E18 */ s16 unk_11E18;
     /* 0x11E1A */ s16 nextEntranceIndex;
     /* 0x11E1C */ char unk_11E1C[0x40];
     /* 0x11E5C */ s8 shootingGalleryStatus;
@@ -1498,7 +1498,17 @@ typedef struct PlayState {
     /* 0x12430 */ char unk_12430[0xE8];
     // SOH [Custom Models] MTX tracker for flex based skeletons
     Mtx** flexLimbOverrideMTX;
+    // FD (2026-07-11): Fierce Deity transform white-fade driver (RE z64.h:921-923). Appended at struct
+    // TAIL for SoH offset stability. ageChangeFlag = target linkAge while a transform fade is running,
+    // -1 = idle; the z_play fade block ramps ageChangeFadeAlpha up while >= 0 and back down while < 0.
+    s8 ageChangeFlag;
+    u8 ageChangeTimer;     // frames to avoid drawing Link at the fully-white fade apex
+    s16 ageChangeFadeAlpha;
 } PlayState; // size = 0x12518
+
+// FD (2026-07-11) transform fade tuning (RE z64.h:103-104)
+#define TRANSFORM_EXTRA_FADE_FRAMES 130
+#define TRANSFORM_FADE_SPEED 45
 
 typedef struct {
     /* 0x0000 */ GameState state;

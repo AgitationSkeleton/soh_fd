@@ -1,3 +1,4 @@
+#include <libultraship/bridge.h>
 #include "soh/ResourceManagerHelpers.h"
 #include "soh/ShipInit.hpp"
 #include "z64save.h"

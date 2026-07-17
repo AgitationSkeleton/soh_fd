@@ -20,9 +20,18 @@ extern u8 gAreaGsFlags[];
 #define AGE_REQ_CHILD LINK_AGE_CHILD
 #define AGE_REQ_NONE 9
 
-#define CHECK_AGE_REQ_EQUIP(i, j) (CVarGetInteger(CVAR_CHEAT("TimelessEquipment"), 0) || (gEquipAgeReqs[i][j] == AGE_REQ_NONE) || (gEquipAgeReqs[i][j] == ((void)0, gSaveContext.linkAge)))
-#define CHECK_AGE_REQ_SLOT(slotIndex) (CVarGetInteger(CVAR_CHEAT("TimelessEquipment"), 0) || (gSlotAgeReqs[slotIndex] == AGE_REQ_NONE) || gSlotAgeReqs[slotIndex] == ((void)0, gSaveContext.linkAge))
-#define CHECK_AGE_REQ_ITEM(itemIndex) (CVarGetInteger(CVAR_CHEAT("TimelessEquipment"), 0) || (gItemAgeReqs[itemIndex] == AGE_REQ_NONE) || (gItemAgeReqs[itemIndex] == gSaveContext.linkAge))
+// FD (2026-07-12): while Fierce Deity, item/equipment usability is governed entirely by Parameter_CanUseItem
+// (the deity allowlist), NOT the age tables -- linkAge==LINK_AGE_DEITY matches no age-req entry, so an AND
+// would wrongly gray FD-usable age-locked trade items. FD can't change ANY equipment (all swords/shields/
+// tunics/boots are 0 in the deity table), so CHECK_AGE_REQ_EQUIP is a flat deny for FD (#10). Slot->item via
+// the inventory. Non-FD keeps vanilla behavior unchanged. Parameter_CanUseItem decl: functions.h.
+// FD (2026-07-15): the "Unrestrict Items for FD" cheat at level 2 ("All except Swords + Shields") lets FD equip
+// TUNICS and BOOTS (rows EQUIP_TYPE_TUNIC/BOOTS) -- both un-grayed AND equippable, since this macro drives the
+// name/icon gray-out and the equip action alike. Swords + shields (rows 0/1) stay denied. Level 0/1 keep the
+// flat deny. (Kept independent of Parameter_CanUseItem because that oracle takes ITEM_* ids, not equip rows.)
+#define CHECK_AGE_REQ_EQUIP(i, j) (LINK_IS_DEITY ? (((CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdUnrestrictItems"), 0) >= 2) && (((i) == EQUIP_TYPE_TUNIC) || ((i) == EQUIP_TYPE_BOOTS))) ? 1 : 0) : (CVarGetInteger(CVAR_CHEAT("TimelessEquipment"), 0) || (gEquipAgeReqs[i][j] == AGE_REQ_NONE) || (gEquipAgeReqs[i][j] == ((void)0, gSaveContext.linkAge))))
+#define CHECK_AGE_REQ_SLOT(slotIndex) (LINK_IS_DEITY ? Parameter_CanUseItem(gSaveContext.inventory.items[slotIndex]) : (CVarGetInteger(CVAR_CHEAT("TimelessEquipment"), 0) || (gSlotAgeReqs[slotIndex] == AGE_REQ_NONE) || gSlotAgeReqs[slotIndex] == ((void)0, gSaveContext.linkAge)))
+#define CHECK_AGE_REQ_ITEM(itemIndex) (LINK_IS_DEITY ? Parameter_CanUseItem(itemIndex) : (CVarGetInteger(CVAR_CHEAT("TimelessEquipment"), 0) || (gItemAgeReqs[itemIndex] == AGE_REQ_NONE) || (gItemAgeReqs[itemIndex] == gSaveContext.linkAge)))
 
 void KaleidoScope_DrawQuestStatus(PlayState* play, GraphicsContext* gfxCtx);
 s32 KaleidoScope_UpdateQuestStatusPoint(PauseContext* pauseCtx, s32 point);

@@ -3,6 +3,7 @@
 #include "soh/Enhancements/debugger/performanceTimer.h"
 #include "soh/ShipUtils.h"
 #include <spdlog/spdlog.h>
+#include "../../randomizer/randomizerTypes.h"
 
 namespace {
 bool seedChanged;
@@ -43,7 +44,7 @@ bool GenerateRandomizer(std::set<RandomizerCheck> excludedLocations, std::set<Ra
     ctx->ClearItemLocations();
     int ret = Playthrough::Playthrough_Init(ctx->GetSeed(), excludedLocations, enabledTricks);
     if (ret < 0) {
-        if (ret == -1) {
+        if (ret == -1) { // Failed to generate after 5 tries
             SPDLOG_ERROR("Failed to generate after 5 tries.");
             return false;
         } else {

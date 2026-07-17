@@ -16,13 +16,10 @@
 #include "soh/Enhancements/randomizer/3drando/random.hpp"
 #include "soh/Enhancements/randomizer/randomizer.h"
 
-#include <vector>
-
 #include <fstream>
 #include <spdlog/spdlog.h>
 extern "C" {
 #include <functions.h>
-#include <variables.h>
 }
 
 namespace Rando {
@@ -46,10 +43,10 @@ RandomizerArea Context::GetAreaFromString(std::string str) {
 
 int Context::CountEmptyLocations(const bool countShops) {
     auto ctx = Rando::Context::GetInstance();
-    return static_cast<int>(count_if(allLocations.begin(), allLocations.end(), [ctx, countShops](const auto loc) {
+    return count_if(allLocations.begin(), allLocations.end(), [ctx, countShops](const auto loc) {
         return ctx->GetItemLocation(loc)->GetPlacedRandomizerGet() == RG_NONE &&
                (countShops || Rando::StaticData::GetLocation(loc)->GetRCType() != RCTYPE_SHOP);
-    }));
+    });
 }
 
 void Context::InitStaticData() {
@@ -152,10 +149,6 @@ bool Context::IsQuestOfLocationActive(RandomizerCheck rc) {
 void Context::GenerateLocationPool() {
     allLocations.clear();
     overworldLocations.clear();
-    // add wincon here so it is properly logged
-    if (ctx->GetOption(RSK_WINCON).Get() > RO_WINCON_ANYWHERE) {
-        AddLocation(RC_WINCON);
-    }
     for (auto dungeon : ctx->GetDungeons()->GetDungeonList()) {
         dungeon->locations.clear();
     }
@@ -163,9 +156,7 @@ void Context::GenerateLocationPool() {
         // skip RCs that shouldn't be in the pool for any reason (i.e. settings, unsupported check type, etc.)
         // TODO: Exclude checks for some of the older shuffles from the pool too i.e. Frog Songs, Scrubs, etc.)
         if (location.GetRandomizerCheck() == RC_UNKNOWN_CHECK ||
-            location.GetRandomizerCheck() == RC_WINCON || // already in pool
-            (location.GetRandomizerCheck() == RC_GANONS_BOSS_KEY && mGBKCondition == RO_CHECK_TRIGGER_NONE) ||
-            (location.GetRandomizerCheck() == RC_GANON_SOUL && mGanonsSoulCondition == RO_CHECK_TRIGGER_NONE) ||
+            location.GetRandomizerCheck() == RC_TRIFORCE_COMPLETED || // already in pool
             (location.GetRandomizerCheck() == RC_TOT_MASTER_SWORD &&
              mOptions[RSK_SHUFFLE_MASTER_SWORD].Is(RO_GENERIC_OFF)) ||
             (location.GetRandomizerCheck() == RC_KAK_100_GOLD_SKULLTULA_REWARD &&
@@ -270,7 +261,7 @@ void Context::GenerateLocationPool() {
 void Context::AddExcludedOptions() {
     for (auto& loc : StaticData::GetLocationTable()) {
         // Checks of these types don't have items, skip them.
-        if (loc.GetRandomizerCheck() == RC_UNKNOWN_CHECK || loc.GetRandomizerCheck() == RC_WINCON ||
+        if (loc.GetRandomizerCheck() == RC_UNKNOWN_CHECK || loc.GetRandomizerCheck() == RC_TRIFORCE_COMPLETED ||
             loc.GetRCType() == RCTYPE_CHEST_GAME || loc.GetRCType() == RCTYPE_STATIC_HINT ||
             loc.GetRCType() == RCTYPE_GOSSIP_STONE) {
             continue;
@@ -417,8 +408,8 @@ void Context::ParseSpoiler(const char* spoilerFileName) {
     } catch (...) { LUSLOG_ERROR("Failed to load Spoiler File: %s", spoilerFileName); }
 }
 
-void Context::ParseHashIconIndexesJson(const nlohmann::json& spoilerFileJson) {
-    nlohmann::json hashJson = spoilerFileJson.value("file_hash", nlohmann::json());
+void Context::ParseHashIconIndexesJson(nlohmann::json spoilerFileJson) {
+    nlohmann::json hashJson = spoilerFileJson["file_hash"];
     int index = 0;
     for (auto it = hashJson.begin(); it != hashJson.end(); ++it) {
         hashIconIndexes[index] = gSeedTextures[it.value()].id;
@@ -426,8 +417,8 @@ void Context::ParseHashIconIndexesJson(const nlohmann::json& spoilerFileJson) {
     }
 }
 
-void Context::ParseItemLocationsJson(const nlohmann::json& spoilerFileJson) {
-    nlohmann::json locationsJson = spoilerFileJson.value("locations", nlohmann::json());
+void Context::ParseItemLocationsJson(nlohmann::json spoilerFileJson) {
+    nlohmann::json locationsJson = spoilerFileJson["locations"];
     for (auto it = locationsJson.begin(); it != locationsJson.end(); ++it) {
         RandomizerCheck rc = StaticData::locationNameToEnum[it.key()];
         if (it->is_structured()) {
@@ -455,22 +446,30 @@ void Context::WriteHintJson(nlohmann::ordered_json& spoilerFileJson) {
     }
 }
 
-void Context::ParseHintJson(const nlohmann::json& spoilerFileJson) {
-    nlohmann::json gossipHintsJson = spoilerFileJson.value("Gossip Stone Hints", nlohmann::json());
-    for (auto hintData : gossipHintsJson.items()) {
+nlohmann::json getValueForMessage(std::unordered_map<std::string, nlohmann::json> map, CustomMessage message) {
+    std::vector<std::string> strings = message.GetAllMessages();
+    for (uint8_t language = 0; language < LANGUAGE_MAX; language++) {
+        if (map.contains(strings[language])) {
+            return strings[language];
+        }
+    }
+    return {};
+}
+
+void Context::ParseHintJson(nlohmann::json spoilerFileJson) {
+    for (auto hintData : spoilerFileJson["Gossip Stone Hints"].items()) {
         RandomizerHint hint = (RandomizerHint)StaticData::hintNameToEnum[hintData.key()];
         AddHint(hint, Hint(hint, hintData.value()));
     }
-    nlohmann::json staticHintsJson = spoilerFileJson.value("Static Hints", nlohmann::json());
-    for (auto hintData : staticHintsJson.items()) {
+    for (auto hintData : spoilerFileJson["Static Hints"].items()) {
         RandomizerHint hint = (RandomizerHint)StaticData::hintNameToEnum[hintData.key()];
         AddHint(hint, Hint(hint, hintData.value()));
     }
     CreateStaticHints();
 }
 
-void Context::ParseTricksJson(const nlohmann::json& spoilerFileJson) {
-    nlohmann::json enabledTricksJson = spoilerFileJson.value("enabledTricks", nlohmann::json());
+void Context::ParseTricksJson(nlohmann::json spoilerFileJson) {
+    nlohmann::json enabledTricksJson = spoilerFileJson["enabledTricks"];
     const auto& settings = Rando::Settings::GetInstance();
     for (auto it : enabledTricksJson) {
         int rt = settings->GetRandomizerTrickByName(it);
@@ -531,28 +530,12 @@ OptionValue& Context::GetLocationOption(const RandomizerCheck key) {
     return itemLocationTable[key].GetExcludedOption();
 }
 
-RandoOptionCheckTrigger Context::GBKCondition() const {
-    return mGBKCondition;
+RandoOptionLACSCondition Context::LACSCondition() const {
+    return mLACSCondition;
 }
 
-void Context::GBKCondition(RandoOptionCheckTrigger condition) {
-    mGBKCondition = condition;
-}
-
-RandoOptionCheckTrigger Context::GanonsSoulCondition() const {
-    return mGanonsSoulCondition;
-}
-
-void Context::GanonsSoulCondition(RandoOptionCheckTrigger condition) {
-    mGanonsSoulCondition = condition;
-}
-
-RandoOptionWincon Context::WinCondition() const {
-    return mWinCondition;
-}
-
-void Context::WinCondition(RandoOptionWincon condition) {
-    mWinCondition = condition;
+void Context::LACSCondition(RandoOptionLACSCondition lacsCondition) {
+    mLACSCondition = lacsCondition;
 }
 
 std::shared_ptr<Kaleido> Context::GetKaleido() {

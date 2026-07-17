@@ -202,10 +202,24 @@ void EnSyatekiMan_SetupIdle(EnSyatekiMan* this, PlayState* play) {
 
 void EnSyatekiMan_Idle(EnSyatekiMan* this, PlayState* play) {
     SkelAnime_Update(&this->skelAnime);
+    // FD (2026-07-15): Fierce Deity can't play the shooting gallery -- the first-person aiming path never gets a bow
+    // (FD's B-button is the FD sword), so the camera hangs behind his head. Evaluate the block against the player's
+    // CURRENT form EVERY frame here (not once at room-entry in SetupIdle) so transforming/untransforming while
+    // standing at the counter updates what the shopkeeper offers, and it's repeatable. Actor_ProcessTalkRequest
+    // opens this->actor.textId; when FD, offer Navi's "You can't do that in your current form!" (served by the
+    // OnOpenText hook in TransformationMaskSafeguards.cpp) instead of the 20-rupee choice. Talk() below closes it
+    // and returns to Idle without deducting rupees or starting the game.
+    if (LINK_IS_DEITY) {
+        this->actor.textId = TEXT_TRANSFORM_CANT_DO_THAT;
+        this->numTextBox = TEXT_STATE_EVENT;
+    } else {
+        this->actor.textId = sTextIds[this->textIdx];
+        this->numTextBox = sTextBoxCount[this->textIdx];
+    }
     if (Actor_ProcessTalkRequest(&this->actor, play)) {
         this->actionFunc = EnSyatekiMan_Talk;
     } else {
-        Actor_OfferTalk(&this->actor, play, 100.0f);
+        func_8002F2CC(&this->actor, play, 100.0f);
     }
 }
 
@@ -217,6 +231,13 @@ void EnSyatekiMan_Talk(EnSyatekiMan* this, PlayState* play) {
         play->shootingGalleryStatus = -2;
     }
     if ((this->numTextBox == Message_GetState(&play->msgCtx)) && Message_ShouldAdvance(play)) {
+        // FD (2026-07-15): if the deity block nag was the message shown, just close it and return to Idle -- no
+        // choice processing, no rupees, no game. Repeatable: Idle re-offers the nag (or the real choice once human).
+        if (LINK_IS_DEITY) {
+            Message_CloseTextbox(play);
+            this->actionFunc = EnSyatekiMan_SetupIdle;
+            return;
+        }
         if (this->textIdx == SYATEKI_TEXT_CHOICE) {
             switch (play->msgCtx.choiceIndex) {
                 case 0:
@@ -305,7 +326,7 @@ void EnSyatekiMan_WaitForGame(EnSyatekiMan* this, PlayState* play) {
     SkelAnime_Update(&this->skelAnime);
     gallery = ((EnSyatekiItm*)this->actor.parent);
     if ((gallery->actor.update != NULL) && (gallery->signal == ENSYATEKI_END)) {
-        this->csCam = OnePointCutscene_Init(play, 8002, -99, &this->actor, CAM_ID_MAIN);
+        this->csCam = OnePointCutscene_Init(play, 8002, -99, &this->actor, MAIN_CAM);
         switch (gallery->hitCount) {
             case 10:
                 this->gameResult = SYATEKI_RESULT_WINNER;
@@ -498,7 +519,7 @@ void EnSyatekiMan_Update(Actor* thisx, PlayState* play) {
     this->blinkFunc(this);
     this->actor.focus.pos.y = 70.0f;
     Actor_SetFocus(&this->actor, 70.0f);
-    Actor_TrackPlayer(play, &this->actor, &this->headRot, &this->bodyRot, this->actor.focus.pos);
+    func_80038290(play, &this->actor, &this->headRot, &this->bodyRot, this->actor.focus.pos);
 }
 
 s32 EnSyatekiMan_OverrideLimbDraw(PlayState* play, s32 limbIndex, Gfx** dList, Vec3f* pos, Vec3s* rot, void* thisx) {

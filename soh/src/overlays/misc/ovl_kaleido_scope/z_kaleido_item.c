@@ -3,6 +3,7 @@
 #include "textures/icon_item_static/icon_item_static.h"
 #include "soh/Enhancements/randomizer/ShuffleTradeItems.h"
 #include "soh/Enhancements/randomizer/RocsFeatherCycle.h"
+#include "soh/Enhancements/FierceDeityMaskCycle.h" // FD (2026-07-11)
 #include "soh/Enhancements/randomizer/randomizerTypes.h"
 #include "soh/Enhancements/cosmetics/cosmeticsTypes.h"
 #include "soh/OTRGlobals.h"
@@ -179,8 +180,15 @@ void KaleidoScope_DrawItemCycleExtras(PlayState* play, u8 slot, u8 canCycle, u8 
     u8 showLeftItem = leftItem != ITEM_NONE && slotItem != leftItem;
     u8 showRightItem = rightItem != ITEM_NONE && slotItem != rightItem && leftItem != rightItem;
 
+    // FD (2026-07-13) save-audit: normally the cycle UI is hidden on an empty slot, but the Fierce Deity's Mask
+    // shares the (possibly empty) first bottle slot and is owned via a flag, not a real item -- so if the bottle is
+    // absent (e.g. never had one, or a legacy save lost it) the mask must still be reachable + visible. Allow the
+    // empty-slot cycle prompt for SLOT_BOTTLE_1 when the mask is owned, so one is always accessible if the other is
+    // gone. (Other cycle slots keep the vanilla empty-slot behaviour.)
+    u8 allowEmptyFdMaskSlot = (slot == SLOT_BOTTLE_1) && gSaveContext.ship.hasFierceDeityMask;
+
     // Render the extra cycle items if at least the left or right item are valid
-    if (canCycle && slotItem != ITEM_NONE && (showLeftItem || showRightItem)) {
+    if (canCycle && (slotItem != ITEM_NONE || allowEmptyFdMaskSlot) && (showLeftItem || showRightItem)) {
         Matrix_Push();
 
         Vtx* itemTopLeft = &pauseCtx->itemVtx[slot * 4];
@@ -380,6 +388,17 @@ void KaleidoScope_HandleItemCycles(PlayState* play) {
     // Handle Nayru's Love/Roc's Feather
     KaleidoScope_HandleItemCycleExtras(play, SLOT_NAYRUS_LOVE, Randomizer_GetSettingValue(RSK_ROCS_FEATHER),
                                        Enhancement_GetPrevNayrusItem(), Enhancement_GetNextNayrusItem(), true);
+
+    // FD (2026-07-11): Handle the Fierce Deity's Mask hosted on the first bottle slot.
+    // CVar-gated for normal gameplay (defaults on); the helper is itself gated on having obtained the mask.
+    KaleidoScope_HandleItemCycleExtras(play, SLOT_BOTTLE_1,
+                                       CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.Enabled"), 1),
+                                       Enhancement_GetPrevBottleDeityItem(), Enhancement_GetNextBottleDeityItem(),
+                                       true);
+
+    // FD (2026-07-12) #12: latch which face (mask vs bottle) the shared slot is showing this pause frame, so the
+    // choice is remembered across pause/unpause (re-applied on the next open by ResetItemCycling below).
+    Enhancement_TrackDeityMaskMenuSelection();
 }
 
 void KaleidoScope_DrawItemCycles(PlayState* play) {
@@ -403,6 +422,11 @@ void KaleidoScope_DrawItemCycles(PlayState* play) {
     // Draw Nayru's Love/Roc's Feather
     KaleidoScope_DrawItemCycleExtras(play, SLOT_NAYRUS_LOVE, Randomizer_GetSettingValue(RSK_ROCS_FEATHER),
                                      Enhancement_GetPrevNayrusItem(), Enhancement_GetNextNayrusItem());
+
+    // FD (2026-07-11): Draw the Fierce Deity's Mask flanking icons / A-prompt on the first bottle slot.
+    KaleidoScope_DrawItemCycleExtras(play, SLOT_BOTTLE_1,
+                                     CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.Enabled"), 1),
+                                     Enhancement_GetPrevBottleDeityItem(), Enhancement_GetNextBottleDeityItem());
 }
 
 bool IsItemCycling() {
@@ -411,6 +435,10 @@ bool IsItemCycling() {
 
 void KaleidoScope_ResetItemCycling() {
     gCurrentItemCyclingSlot = -1;
+    // FD (2026-07-12) #12: on menu (re)open, restore the FD mask to its shared slot if it was the last-selected
+    // face -- the gameplay guard reset the slot to the bottle on the previous close. Idempotent: the per-frame
+    // Track keeps the flag current, so this never overrides a live bottle selection.
+    Enhancement_ApplyDeityMaskMenuSelection();
 }
 
 #pragma endregion

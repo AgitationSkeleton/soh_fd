@@ -31,6 +31,7 @@ typedef enum {
     BR_OPTIONS_LONGSHOT,
     BR_OPTIONS_HOVERBOOTS,
     BR_OPTIONS_BUNNYHOOD,
+    BR_OPTIONS_FIERCE_DEITY_MASK, // FD (2026-07-12): "start with Fierce Deity's Mask" boss-rush option
     BR_OPTIONS_TIMER,
     BR_OPTIONS_MAX,
 } BossRushOptionEnums;

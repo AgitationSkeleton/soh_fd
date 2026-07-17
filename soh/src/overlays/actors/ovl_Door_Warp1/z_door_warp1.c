@@ -2,7 +2,6 @@
 #include "objects/object_warp1/object_warp1.h"
 #include "soh/Enhancements/randomizer/randomizer_entrance.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
-#include "soh/Enhancements/savestate_serialize.h"
 
 #define FLAGS 0
 
@@ -36,6 +35,24 @@ void DoorWarp1_DoNothing(DoorWarp1* this, PlayState* play);
 void DoorWarp1_ChooseInitialAction(DoorWarp1* this, PlayState* play);
 void DoorWarp1_FloatPlayer(DoorWarp1* this, PlayState* play);
 
+// FD (2026-07-12) #E: a boss-clear blue warp only ever exists in a boss lair, so a Fierce Deity stepping into it
+// is leaving the FD-usable zone -> revert ON CONTACT with the port's existing FD white-fade: setting
+// play->ageChangeFlag to the real age drives the z_play.c white-overlay ramp + the Player_Draw apex commit
+// (skeleton swap + B restore), plus the "shing" flash sfx (NA_SE_EV_TRIFORCE_FLASH, the same id the FD transform
+// flash uses). The warp's own float/transition then proceeds with Link already back to his real age. Fires once
+// (ageChangeFlag<0 guard). The FdUsableAnywhere cheat leaves FD as-is.
+static void DoorWarp1_RevertFierceDeity(PlayState* play) {
+    if ((gSaveContext.linkAge == LINK_AGE_DEITY) && (play->ageChangeFlag < 0) &&
+        !CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdUsableAnywhere"), 0)) {
+        u8 realAge = gSaveContext.ship.fierceDeityPreviousForm;
+        if (realAge > LINK_AGE_CHILD) {
+            realAge = LINK_AGE_ADULT;
+        }
+        play->ageChangeFlag = realAge;                // start the white-fade revert (no cutscene)
+        Sfx_PlaySfxCentered(NA_SE_EV_TRIFORCE_FLASH); // the "shing" flash on contact
+    }
+}
+
 const ActorInit Door_Warp1_InitVars = {
     ACTOR_DOOR_WARP1,
     ACTORCAT_ITEMACTION,
@@ -56,10 +73,7 @@ static InitChainEntry sInitChain[] = {
     ICHAIN_F32(uncullZoneDownward, 4000, ICHAIN_STOP),
 };
 
-static s16 sWarpTimerTarget;
-
-#define DOOR_WARP1_SHIP_SAVESTATE_FIELDS(F) F(sWarpTimerTarget)
-SHIP_SAVESTATE_DEFINE(DoorWarp1, DOOR_WARP1_SHIP_SAVESTATE_FIELDS)
+s16 sWarpTimerTarget;
 
 void DoorWarp1_SetupAction(DoorWarp1* this, DoorWarp1ActionFunc actionFunc) {
     this->actionFunc = actionFunc;
@@ -186,7 +200,7 @@ void DoorWarp1_SetupWarp(DoorWarp1* this, PlayState* play) {
                    gSaveContext.entranceIndex == ENTR_LAKE_HYLIA_WATER_TEMPLE_BLUE_WARP || // lake hylia
                    gSaveContext.entranceIndex == ENTR_DESERT_COLOSSUS_SPIRIT_TEMPLE_BLUE_WARP || // desert colossus
                    gSaveContext.entranceIndex == ENTR_GRAVEYARD_SHADOW_TEMPLE_BLUE_WARP) &&      // graveyard
-                 gSaveContext.sceneLayer < 4) ||
+                 gSaveContext.sceneSetupIndex < 4) ||
                 (GET_PLAYER(play)->actor.params & 0xF00) != 0x200) {
                 Actor_Kill(&this->actor);
             }
@@ -496,11 +510,12 @@ void DoorWarp1_ChildWarpIdle(DoorWarp1* this, PlayState* play) {
     Audio_PlayActorSound2(&this->actor, NA_SE_EV_WARP_HOLE - SFX_FLAG);
 
     if (DoorWarp1_PlayerInRange(this, play)) {
+        DoorWarp1_RevertFierceDeity(play); // FD (2026-07-12) #E: revert on blue-warp contact
         player = GET_PLAYER(play);
 
         Audio_PlaySoundGeneral(NA_SE_EV_LINK_WARP, &player->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
                                &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-        OnePointCutscene_Init(play, 0x25E7, 999, &this->actor, CAM_ID_MAIN);
+        OnePointCutscene_Init(play, 0x25E7, 999, &this->actor, MAIN_CAM);
         Player_SetCsActionWithHaltedActors(play, &this->actor, 10);
 
         player->unk_450.x = this->actor.world.pos.x;
@@ -586,6 +601,7 @@ void DoorWarp1_RutoWarpIdle(DoorWarp1* this, PlayState* play) {
     Audio_PlayActorSound2(&this->actor, NA_SE_EV_WARP_HOLE - SFX_FLAG);
 
     if (this->rutoWarpState != WARP_BLUE_RUTO_STATE_INITIAL && DoorWarp1_PlayerInRange(this, play)) {
+        DoorWarp1_RevertFierceDeity(play); // FD (2026-07-12) #E: revert on blue-warp contact
         this->rutoWarpState = WARP_BLUE_RUTO_STATE_ENTERED;
         Player_SetCsActionWithHaltedActors(play, &this->actor, 10);
         this->unk_1B2 = 1;
@@ -601,7 +617,7 @@ void func_80999EE0(DoorWarp1* this, PlayState* play) {
     Player* player = GET_PLAYER(play);
 
     if (this->rutoWarpState == WARP_BLUE_RUTO_STATE_3) {
-        Play_ChangeCameraStatus(play, CAM_ID_MAIN, CAM_STAT_WAIT);
+        Play_ChangeCameraStatus(play, MAIN_CAM, CAM_STAT_WAIT);
         sRutoWarpSubCamId = Play_CreateSubCamera(play);
 
         Play_ChangeCameraStatus(play, sRutoWarpSubCamId, CAM_STAT_ACTIVE);
@@ -625,7 +641,7 @@ void func_80999FE4(DoorWarp1* this, PlayState* play) {
     if (Message_GetState(&play->msgCtx) == TEXT_STATE_NONE) {
         Audio_PlaySoundGeneral(NA_SE_EV_LINK_WARP, &this->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
                                &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-        OnePointCutscene_Init(play, 0x25E9, 999, &this->actor, CAM_ID_MAIN);
+        OnePointCutscene_Init(play, 0x25E9, 999, &this->actor, MAIN_CAM);
         Play_CopyCamera(play, -1, sRutoWarpSubCamId);
         Play_ChangeCameraStatus(play, sRutoWarpSubCamId, CAM_STAT_WAIT);
         this->rutoWarpState = WARP_BLUE_RUTO_STATE_WARPING;
@@ -697,9 +713,10 @@ void DoorWarp1_AdultWarpIdle(DoorWarp1* this, PlayState* play) {
     Audio_PlayActorSound2(&this->actor, NA_SE_EV_WARP_HOLE - SFX_FLAG);
 
     if (GameInteractor_Should(VB_BLUE_WARP_CONSIDER_ADULT_IN_RANGE, DoorWarp1_PlayerInRange(this, play), this)) {
+        DoorWarp1_RevertFierceDeity(play); // FD (2026-07-12) #E: revert on blue-warp contact
         player = GET_PLAYER(play);
 
-        OnePointCutscene_Init(play, 0x25E8, 999, &this->actor, CAM_ID_MAIN);
+        OnePointCutscene_Init(play, 0x25E8, 999, &this->actor, MAIN_CAM);
         Player_SetCsActionWithHaltedActors(play, &this->actor, 10);
         player->unk_450.x = this->actor.world.pos.x;
         player->unk_450.z = this->actor.world.pos.z;

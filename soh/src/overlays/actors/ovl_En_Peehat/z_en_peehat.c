@@ -570,7 +570,7 @@ void EnPeehat_Larva_StateSeekPlayer(EnPeehat* this, PlayState* play) {
         this->colQuad.base.acFlags = this->colQuad.base.acFlags & ~AC_BOUNCED;
         EnPeehat_SetStateAttackRecoil(this);
     } else if ((this->colQuad.base.atFlags & AT_HIT) || (this->colCylinder.base.acFlags & AC_HIT) ||
-               (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+               (this->actor.bgCheckFlags & 1)) {
         Player* player = GET_PLAYER(play);
         this->colQuad.base.atFlags &= ~AT_HIT;
         if (!(this->colCylinder.base.acFlags & AC_HIT) && &player->actor == this->colQuad.base.at) {
@@ -580,7 +580,7 @@ void EnPeehat_Larva_StateSeekPlayer(EnPeehat* this, PlayState* play) {
                 this->actor.world.rot.y -= 0x2000;
             }
             this->unk_2D4 = 40;
-        } else if (this->colCylinder.base.acFlags & AC_HIT || this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+        } else if (this->colCylinder.base.acFlags & AC_HIT || this->actor.bgCheckFlags & 1) {
             Vec3f zeroVec = { 0, 0, 0 };
             s32 i;
             for (i = 4; i >= 0; i--) {
@@ -592,7 +592,7 @@ void EnPeehat_Larva_StateSeekPlayer(EnPeehat* this, PlayState* play) {
             }
         }
         if (&player->actor != this->colQuad.base.at || this->colCylinder.base.acFlags & AC_HIT) {
-            if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+            if (!(this->actor.bgCheckFlags & 1)) {
                 EffectSsDeadSound_SpawnStationary(play, &this->actor.projectedPos, NA_SE_EN_PIHAT_SM_DEAD, 1, 1, 40);
             }
             Item_DropCollectibleRandom(play, &this->actor, &this->actor.world.pos, 0x20);

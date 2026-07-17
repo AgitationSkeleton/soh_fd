@@ -919,7 +919,7 @@ void BossGanondrof_Death(BossGanondrof* this, PlayState* play) {
             func_80064520(play, &play->csCtx);
             Player_SetCsActionWithHaltedActors(play, &this->actor, 1);
             this->deathCamera = Play_CreateSubCamera(play);
-            Play_ChangeCameraStatus(play, CAM_ID_MAIN, CAM_STAT_WAIT);
+            Play_ChangeCameraStatus(play, MAIN_CAM, CAM_STAT_WAIT);
             osSyncPrintf("7\n");
             Play_ChangeCameraStatus(play, this->deathCamera, CAM_STAT_ACTIVE);
             osSyncPrintf("8\n");
@@ -1188,10 +1188,31 @@ void BossGanondrof_Death(BossGanondrof* this, PlayState* play) {
     }
 }
 
+// FD (2026-07-12) BOSS PARITY (aegiker): Phantom Ganon normally can only be hurt by reflecting his energy ball
+// back at him; the FD sword beam lets the deity damage him directly. Scan the item-action actor list for a great
+// FD beam within +-40 units of Ganondrof (RE BossGanondrof_FindSwordBeam z_boss_ganondrof.c:1240). Uses the shared
+// EnMThunder_IsFdSwordBeam predicate (great subtype only). The beam is treated as a hit in CollisionCheck below.
+u8 BossGanondrof_FindSwordBeam(BossGanondrof* this, PlayState* play) {
+    Actor* beam = play->actorCtx.actorLists[ACTORCAT_ITEMACTION].head;
+
+    while (beam != NULL) {
+        if (EnMThunder_IsFdSwordBeam(beam) &&
+            (fabsf(beam->world.pos.x - this->actor.world.pos.x) < 40.0f) &&
+            (fabsf(beam->world.pos.y - this->actor.world.pos.y) < 40.0f) &&
+            (fabsf(beam->world.pos.z - this->actor.world.pos.z) < 40.0f)) {
+            return true;
+        }
+        beam = beam->next;
+    }
+    return false;
+}
+
 void BossGanondrof_CollisionCheck(BossGanondrof* this, PlayState* play) {
     s32 acHit;
     EnfHG* horse = (EnfHG*)this->actor.child;
-    ColliderInfo* hurtbox;
+    ColliderInfo* hurtbox = NULL;
+    // FD (2026-07-12): a nearby FD great sword beam counts as a hit even without AC contact (RE z_boss_ganondrof.c:1280).
+    u8 swordBeamed = BossGanondrof_FindSwordBeam(this, play);
 
     if (this->work[GND_INVINC_TIMER] != 0) {
         this->work[GND_INVINC_TIMER]--;
@@ -1199,7 +1220,7 @@ void BossGanondrof_CollisionCheck(BossGanondrof* this, PlayState* play) {
         this->colliderBody.base.acFlags &= ~AC_HIT;
     } else {
         acHit = this->colliderBody.base.acFlags & AC_HIT;
-        if ((acHit && ((s8)this->actor.colChkInfo.health > 0)) || (this->returnCount != 0)) {
+        if (((acHit || swordBeamed) && ((s8)this->actor.colChkInfo.health > 0)) || (this->returnCount != 0)) {
             if (acHit) {
                 this->colliderBody.base.acFlags &= ~AC_HIT;
                 hurtbox = this->colliderBody.info.acHitInfo;
@@ -1208,11 +1229,17 @@ void BossGanondrof_CollisionCheck(BossGanondrof* this, PlayState* play) {
                 if (acHit && (this->actionFunc != BossGanondrof_Stunned) && (hurtbox->toucher.dmgFlags & 0x0001F8A4)) {
                     Audio_PlayActorSound2(&this->actor, NA_SE_PL_WALK_GROUND - SFX_FLAG);
                     osSyncPrintf("hit != 0 \n");
-                } else if (this->actionFunc != BossGanondrof_Charge) {
+                } else if ((this->actionFunc != BossGanondrof_Charge) || swordBeamed) {
                     if (this->returnCount == 0) {
                         u8 dmg;
                         u8 canKill = false;
-                        s32 dmgFlags = hurtbox->toucher.dmgFlags;
+                        // FD: no hurtbox when only the proximity beam struck; OR in DMG_SWORD_BEAM like the RE (bit 31
+                        // resolves to 0 in SoH's GetSwordDamage, so the dmg==0 -> 2 fallback below gives the beam's hit).
+                        s32 dmgFlags = (hurtbox != NULL) ? hurtbox->toucher.dmgFlags : 0;
+
+                        if (swordBeamed) {
+                            dmgFlags |= 0x80000000; // DMG_SWORD_BEAM
+                        }
 
                         if (dmgFlags & 0x80) {
                             return;
@@ -1275,6 +1302,18 @@ void BossGanondrof_Update(Actor* thisx, PlayState* play) {
     osSyncPrintf("MOVE START EEEEEEEEEEEEEEEEEEEEEE%d\n", this->actor.params);
 
     this->actionFunc(this, play);
+
+    // FD (2026-07-12) BOSS PARITY (aegiker): make the REAL Phantom Ganon Z-targetable for Fierce Deity (only at
+    // full/near-full scale -- present & attackable, not the tiny painting decoys) so FD can lock on and aim his
+    // sword beams. RE z_boss_ganondrof.c:457. (ACTOR_FLAG_0 == SoH ACTOR_FLAG_ATTENTION_ENABLED.) Applied after the
+    // action func so it wins for the deity; non-deity is untouched.
+    if ((this->actor.params == GND_REAL_BOSS) && LINK_IS_DEITY) {
+        if (this->actor.scale.x > 0.00209913076833f) {
+            this->actor.flags |= ACTOR_FLAG_ATTENTION_ENABLED;
+        } else {
+            this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+        }
+    }
 
     for (i = 0; i < ARRAY_COUNT(this->timers); i++) {
         if (this->timers[i]) {

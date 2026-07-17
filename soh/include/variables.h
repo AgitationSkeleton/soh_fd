@@ -77,14 +77,14 @@ extern "C"
 	extern u8 D_8011FB34;
 	extern u8 D_8011FB38;
 	extern u8 gSkyboxBlendingEnabled;
-	extern u16 gTimeSpeed;
+	extern u16 gTimeIncrement;
 	extern struct_8011FC1C D_8011FC1C[][9];
 	extern SkyboxFile gSkyboxFiles[];
 	extern s32 gZeldaArenaLogSeverity;
 	extern MapData gMapDataTable;
 	extern s16 gSpoilingItems[3];
 	extern s16 gSpoilingItemReverts[3];
-	extern FlexSkeletonHeader* gPlayerSkelHeaders[2];
+	extern FlexSkeletonHeader* gPlayerSkelHeaders[LINK_AGE_MAX]; // was [2]; +LINK_AGE_DEITY (aegiker RE->SoH 2026-07-11)
 	extern u8 gPlayerModelTypes[PLAYER_MODELGROUP_MAX][PLAYER_MODELGROUPENTRY_MAX];
 	extern Gfx* gPlayerLeftHandBgsDLs[];
 	extern Gfx* gPlayerLeftHandOpenDLs[];
@@ -103,12 +103,12 @@ extern "C"
 	extern u16 gUpgradeCapacities[8][4];
 	extern u32 gGsFlagsMasks[4];
 	extern u32 gGsFlagsShifts[4];
-	extern void* gItemIcons[158];
+	extern void* gItemIcons[160]; // was [158]; +ITEM_SWORD_DEITY(0x9E)/ITEM_MASK_DEITY(0x9F) FD 2026-07-11
 	extern u8 gItemAgeReqs[];
 	extern u8 gSlotAgeReqs[];
 	extern u8 gItemSlots[56];
 	extern void (*gSceneCmdHandlers[SCENE_CMD_ID_MAX])(PlayState*, SceneCmd*);
-	extern s16 gLinkObjectIds[2];
+	extern s16 gLinkObjectIds[LINK_AGE_MAX]; // was [2]; +LINK_AGE_DEITY (aegiker RE->SoH 2026-07-11)
 	extern u32 gObjectTableSize;
 	extern RomFile gObjectTable[OBJECT_ID_MAX];
 	extern EntranceInfo gEntranceTable[ENTR_MAX];

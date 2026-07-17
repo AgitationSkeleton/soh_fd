@@ -39,26 +39,15 @@ u8 D_80133418 = 0;
 void func_800F9280(u8 playerIdx, u8 seqId, u8 arg2, u16 fadeTimer) {
     u8 i;
     u16 dur;
-    u16 resolvedSeqId;
     s32 pad;
 
     if (D_80133408 == 0 || playerIdx == SEQ_PLAYER_SFX) {
-        // Resolve here so the full 16-bit id rides in the command (bits 0-15) rather than the shared
-        // seqToPlay slot. seqReplaced is set out-of-band by preview/slow load.
-        // See AudioEditor_GetReplacementSeq().
-        if (gAudioContext.seqReplaced[playerIdx]) {
-            resolvedSeqId = gAudioContext.seqToPlay[playerIdx];
-            gAudioContext.seqReplaced[playerIdx] = 0;
-        } else {
-            resolvedSeqId = AudioEditor_GetReplacementSeq(seqId);
-        }
-
         arg2 &= 0x7F;
         if (arg2 == 0x7F) {
             dur = (fadeTimer >> 3) * 60 * gAudioContext.audioBufferParameters.updatesPerFrame;
-            Audio_QueueCmdS32(0x85000000 | _SHIFTL(playerIdx, 16, 8) | (resolvedSeqId & 0xFFFF), dur);
+            Audio_QueueCmdS32(0x85000000 | _SHIFTL(playerIdx, 16, 8) | _SHIFTL(seqId, 8, 8), dur);
         } else {
-            Audio_QueueCmdS32(0x82000000 | _SHIFTL(playerIdx, 16, 8) | (resolvedSeqId & 0xFFFF),
+            Audio_QueueCmdS32(0x82000000 | _SHIFTL(playerIdx, 16, 8) | _SHIFTL(seqId, 8, 8),
                               (fadeTimer * (u16)gAudioContext.audioBufferParameters.updatesPerFrame) / 4);
         }
 
@@ -379,8 +368,20 @@ void Audio_ProcessSeqCmd(u32 cmd) {
     }
 }
 
+extern f32 D_80130F24;
+extern f32 D_80130F28;
+
 void Audio_QueueSeqCmd(u32 cmd) {
-    // Replacement is resolved per-command in func_800F9280().
+    u8 op = cmd >> 28;
+    if (op == 0 || op == 2 || op == 12) {
+        u8 seqId = cmd & 0xFF;
+        u8 playerIdx = GET_PLAYER_IDX(cmd);
+        u16 newSeqId = AudioEditor_GetReplacementSeq(seqId);
+        gAudioContext.seqReplaced[playerIdx] = (seqId != newSeqId);
+        gAudioContext.seqToPlay[playerIdx] = newSeqId;
+        cmd |= (seqId & 0xFF);
+    }
+
     sAudioSeqCmds[sSeqCmdWrPos++] = cmd;
 }
 
@@ -388,6 +389,19 @@ void Audio_QueuePreviewSeqCmd(u16 seqId) {
     gAudioContext.seqReplaced[0] = 1;
     gAudioContext.seqToPlay[0] = seqId;
     sAudioSeqCmds[sSeqCmdWrPos++] = 1;
+}
+
+// FD (2026-07-12): generalized preview-start. Identical proven mechanism as Audio_QueuePreviewSeqCmd (the Audio
+// Editor's audible preview of custom streamed sequences) but targets an arbitrary seq player instead of hardcoding
+// BGM_MAIN. It writes the play-sequence command DIRECTLY into the ring buffer and MUST NOT route through
+// Audio_QueueSeqCmd: that helper truncates the command to (cmd & 0xFF) and re-derives seqReplaced/seqToPlay from
+// that 8-bit id via AudioEditor_GetReplacementSeq, which CLOBBERS this manual redirect and drops any custom
+// seqNumber >= 256 (all the FD custom sequences) -> silence. op 0 (play now) on `playerIdx`; the low-byte source id
+// is 0 and is overridden by seqToPlay[playerIdx] when the loader consumes seqReplaced[playerIdx].
+void Audio_QueuePreviewSeqCmdOnPlayer(u8 playerIdx, u16 seqId) {
+    gAudioContext.seqReplaced[playerIdx] = 1;
+    gAudioContext.seqToPlay[playerIdx] = seqId; // full 16-bit custom seqNumber
+    sAudioSeqCmds[sSeqCmdWrPos++] = ((u32)(playerIdx & 0xF) << 24);
 }
 
 void Audio_ProcessSeqCmds(void) {

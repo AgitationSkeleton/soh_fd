@@ -74,7 +74,7 @@ void BgSpot03Taki_HandleWaterfallState(BgSpot03Taki* this, PlayState* play) {
         if (Flags_GetSwitch(play, this->switchFlag)) {
             this->state = WATERFALL_OPENING_ANIMATED;
             this->timer = 40;
-            OnePointCutscene_Init(play, 4100, -99, NULL, CAM_ID_MAIN);
+            OnePointCutscene_Init(play, 4100, -99, NULL, MAIN_CAM);
         }
     } else if (this->state == WATERFALL_OPENING_IDLE) {
         this->timer--;

@@ -403,7 +403,7 @@ s32 EnSt_CheckHitLink(EnSt* this, PlayState* play) {
     this->gaveDamageSpinTimer = 30;
     play->damagePlayer(play, -8);
     Audio_PlayActorSound2(&player->actor, NA_SE_PL_BODY_HIT);
-    Actor_SetPlayerKnockbackLargeNoDamage(play, &this->actor, 4.0f, this->actor.yawTowardsPlayer, 6.0f);
+    func_8002F71C(play, &this->actor, 4.0f, this->actor.yawTowardsPlayer, 6.0f);
     return true;
 }
 
@@ -487,6 +487,30 @@ s32 EnSt_CheckHitBackside(EnSt* this, PlayState* play) {
  * Checks if the Skulltula's colliders have been hit, returns true if the hit has dealt damage to the Skulltula
  */
 s32 EnSt_CheckColliders(EnSt* this, PlayState* play) {
+    // FD (2026-07-12) BOSS/ENEMY PARITY (aegiker): a Fierce Deity great sword beam striking the Skulltula's armored
+    // FRONT one-shots it -- bypassing the "hit the back" requirement. RE En_St z_en_st.c:421 (front-side
+    // DMG_SWORD_BEAM -> EnSt_FuckItJustDieInstantly). The front collider (colCylinder[2]) registers the beam's 0x200
+    // but EnSt_CheckHitFrontside below would negate it and clear AC_HIT, so detect + kill BEFORE that. Death mirrors
+    // the normal backside-kill setup (color flash, finishing blow, bounce-and-die).
+    if ((this->colCylinder[2].base.acFlags & AC_HIT) && EnMThunder_IsFdSwordBeam(this->colCylinder[2].base.ac)) {
+        this->colCylinder[2].base.acFlags &= ~AC_HIT;
+        this->swayTimer = this->stunTimer = 0;
+        this->gaveDamageSpinTimer = 1;
+        Animation_ChangeByInfo(&this->skelAnime, sAnimationInfo, ENST_ANIM_3);
+        this->takeDamageSpinTimer = this->skelAnime.animLength;
+        Actor_SetColorFilter(&this->actor, 0x4000, 0xC8, 0, this->takeDamageSpinTimer);
+        this->actor.colChkInfo.health = 0;
+        Enemy_StartFinishingBlow(play, &this->actor);
+        this->actor.flags &= ~ACTOR_FLAG_ATTENTION_ENABLED;
+        this->groundBounces = 3;
+        this->deathTimer = 20;
+        this->actor.gravity = -1.0f;
+        Audio_PlayActorSound2(&this->actor, NA_SE_EN_STALWALL_DEAD);
+        GameInteractor_ExecuteOnEnemyDefeat(&this->actor);
+        EnSt_SetupAction(this, EnSt_BounceAround);
+        return true;
+    }
+
     if (EnSt_CheckHitFrontside(this)) {
         // player has hit the front shield area of the Skulltula
         return false;
@@ -660,7 +684,7 @@ s32 EnSt_IsDoneBouncing(EnSt* this, PlayState* play) {
         return false;
     }
 
-    if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+    if (!(this->actor.bgCheckFlags & 1)) {
         // the Skulltula is not on the ground.
         return false;
     }

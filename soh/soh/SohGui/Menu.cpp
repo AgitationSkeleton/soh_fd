@@ -1,8 +1,7 @@
 #include "Menu.h"
-#include "BackendTypes.h"
 #include "UIWidgets.hpp"
 #include "soh/OTRGlobals.h"
-#include <ship/config/Config.h>
+#include <ship/window/gui/GuiMenuBar.h>
 #include <ship/window/gui/GuiElement.h>
 #include "SohModals.h"
 #include <variant>
@@ -99,15 +98,6 @@ void Menu::RemoveSidebarSearch() {
     CVarSetString(menuEntries["Settings"].sidebarCvar, menuEntries["Settings"].sidebarOrder.at(curIndex).c_str());
 }
 
-void Menu::UpdateAudioBackendObjects() {
-    availableAudioBackends = Ship::Context::GetRawInstance()->GetAudio()->GetAvailableAudioBackends();
-    for (auto& backend : *availableAudioBackends) {
-        if (auto it = audioBackendsMap.find(backend); it != audioBackendsMap.end()) {
-            availableAudioBackendsMap[backend] = it->second;
-        }
-    }
-}
-
 void Menu::UpdateWindowBackendObjects() {
     Fast::WindowBackend runningWindowBackend =
         (Fast::WindowBackend)Ship::Context::GetRawInstance()->GetWindow()->GetWindowBackend();
@@ -120,10 +110,7 @@ void Menu::UpdateWindowBackendObjects() {
 
     availableWindowBackends = Ship::Context::GetRawInstance()->GetWindow()->GetAvailableWindowBackends();
     for (auto& backend : *availableWindowBackends) {
-        auto windowBackend = (Fast::WindowBackend)backend;
-        if (auto it = windowBackendsMap.find(windowBackend); it != windowBackendsMap.end()) {
-            availableWindowBackendsMap[windowBackend] = it->second;
-        }
+        availableWindowBackendsMap[(Fast::WindowBackend)backend] = windowBackendsMap.at((Fast::WindowBackend)backend);
     }
 }
 
@@ -238,12 +225,19 @@ uint32_t Menu::DrawSearchResults(std::string& menuSearchText) {
                                 std::static_pointer_cast<UIWidgets::ComboboxOptions>(info.options)->labelPosition =
                                     UIWidgets::LabelPositions::Above;
                             }
+                            // FD (2026-07-14): scope each search result under a unique ImGui ID. Different
+                            // settings can share a display label (e.g. the "Blue Fire Arrows" Enhancement AND the
+                            // "Blue Fire Arrows" Randomizer setting both match a "blue" search), and rendering two
+                            // widgets with the same label under the same scope triggers Dear ImGui's "conflicting
+                            // ID" assert. searchCount is unique per rendered result.
+                            ImGui::PushID(searchCount);
                             MenuDrawItem(info, 400, menuThemeIndex);
                             ImGui::PushStyleColor(ImGuiCol_Text, UIWidgets::ColorValues.at(UIWidgets::Colors::Gray));
                             std::string origin =
                                 fmt::format("  ({} -> {}, Col {})", menuEntry.label, sidebarLabel, i + 1);
                             ImGui::Text("%s", origin.c_str());
                             ImGui::PopStyleColor();
+                            ImGui::PopID();
                             searchCount++;
                             if (info.type == WIDGET_COMBOBOX || info.type == WIDGET_CVAR_COMBOBOX) {
                                 std::static_pointer_cast<UIWidgets::ComboboxOptions>(info.options)->alignment =
@@ -266,11 +260,15 @@ uint32_t Menu::DrawSearchResults(std::string& menuSearchText) {
             std::transform(widgetStr.begin(), widgetStr.end(), widgetStr.begin(), ::tolower);
             widgetStr.erase(std::remove(widgetStr.begin(), widgetStr.end(), ' '), widgetStr.end());
             if (widgetStr.find(menuSearchText) != std::string::npos) {
+                // FD (2026-07-14): unique ID scope per result (see the note in the main loop above) so same-label
+                // widgets from different menus don't collide with Dear ImGui's "conflicting ID" assert.
+                ImGui::PushID(searchCount);
                 MenuDrawItem(entry.info, 400, menuThemeIndex);
                 ImGui::PushStyleColor(ImGuiCol_Text, UIWidgets::ColorValues.at(UIWidgets::Colors::Gray));
                 std::string origin = fmt::format("  ({} -> {}, {})", entry.menuName, entry.sidebarName, entry.location);
                 ImGui::Text("%s", origin.c_str());
                 ImGui::PopStyleColor();
+                ImGui::PopID();
                 searchCount++;
             }
         }
@@ -354,9 +352,10 @@ void Menu::MenuDrawItem(WidgetInfo& widget, uint32_t width, UIWidgets::Colors me
                 UIWidgets::ComboboxOptions options = {};
                 options.color = menuThemeIndex;
                 options.tooltip = "Sets the audio API used by the game. Requires a relaunch to take effect.";
-                options.disabled = availableAudioBackends->size() <= 1;
+                options.disabled =
+                    Ship::Context::GetRawInstance()->GetAudio()->GetAvailableAudioBackends()->size() <= 1;
                 options.disabledTooltip = "Only one audio API is available on this platform.";
-                if (UIWidgets::Combobox("Audio API", &currentAudioBackend, availableAudioBackendsMap, options)) {
+                if (UIWidgets::Combobox("Audio API", &currentAudioBackend, audioBackendsMap, options)) {
                     Ship::Context::GetRawInstance()->GetAudio()->SetCurrentAudioBackend(currentAudioBackend);
                 }
             } break;
@@ -826,7 +825,7 @@ void Menu::DrawElement() {
     pos.y += headerHeight + style.ItemSpacing.y;
     pos.x = centerX - menuSize.x / 2 + (style.ItemSpacing.x * (menuEntries.size() + 1));
     window->DrawList->AddRectFilled(pos, pos + ImVec2{ menuSize.x, 4 }, ImGui::GetColorU32({ 255, 255, 255, 255 }),
-                                    style.WindowRounding);
+                                    true, style.WindowRounding);
     pos.y += style.ItemSpacing.y;
     float sectionHeight = menuSize.y - headerHeight - 4 - style.ItemSpacing.y * 2;
     float columnHeight = sectionHeight - style.ItemSpacing.y * 4;
@@ -876,7 +875,7 @@ void Menu::DrawElement() {
 
     pos = ImVec2{ sectionCenterX + (sidebarWidth / 2), topY } + style.ItemSpacing * 2;
     window->DrawList->AddRectFilled(pos, pos + ImVec2{ 4, sectionHeight - style.FramePadding.y * 2 },
-                                    ImGui::GetColorU32({ 255, 255, 255, 255 }), style.WindowRounding);
+                                    ImGui::GetColorU32({ 255, 255, 255, 255 }), true, style.WindowRounding);
     pos.x += 4 + style.ItemSpacing.x;
     ImGui::SetNextWindowPos(pos + style.ItemSpacing);
     float sectionWidth = menuSize.x - sidebarWidth - 4 - style.ItemSpacing.x * 4;

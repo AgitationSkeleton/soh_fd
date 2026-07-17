@@ -196,12 +196,11 @@ static const char* actionsTbl[] = {
 };
 
 // original name: "alpha_change"
-void Interface_ChangeHudVisibilityMode(u16 hudVisibilityMode) {
-    if (hudVisibilityMode != gSaveContext.hudVisibilityMode) {
-        osSyncPrintf("ＡＬＰＨＡーＴＹＰＥ＝%d  LAST_TIME_TYPE=%d\n", hudVisibilityMode,
-                     gSaveContext.prevHudVisibilityMode);
-        gSaveContext.hudVisibilityMode = gSaveContext.nextHudVisibilityMode = hudVisibilityMode;
-        gSaveContext.hudVisibilityModeTimer = 1;
+void Interface_ChangeAlpha(u16 alphaType) {
+    if (alphaType != gSaveContext.unk_13EA) {
+        osSyncPrintf("ＡＬＰＨＡーＴＹＰＥ＝%d  LAST_TIME_TYPE=%d\n", alphaType, gSaveContext.unk_13EE);
+        gSaveContext.unk_13EA = gSaveContext.unk_13E8 = alphaType;
+        gSaveContext.unk_13EC = 1;
     }
 }
 
@@ -348,13 +347,13 @@ void func_80082850(PlayState* play, s16 maxAlpha) {
     InterfaceContext* interfaceCtx = &play->interfaceCtx;
     s16 alpha = 255 - maxAlpha;
 
-    switch (gSaveContext.nextHudVisibilityMode) {
+    switch (gSaveContext.unk_13E8) {
         case 1:
         case 2:
         case 8:
             osSyncPrintf("a_alpha=%d, c_alpha=%d   →   ", interfaceCtx->aAlpha, interfaceCtx->cLeftAlpha);
 
-            if (gSaveContext.nextHudVisibilityMode == 8) {
+            if (gSaveContext.unk_13E8 == 8) {
                 if (interfaceCtx->bAlpha != 255) {
                     interfaceCtx->bAlpha = alpha;
                 }
@@ -797,6 +796,92 @@ void func_80082850(PlayState* play, s16 maxAlpha) {
     }
 }
 
+// buttonStatus[0] is used to represent if the B button is disabled, but also tracks
+// the last active B button item during mini-games/epona (temp B)
+// Since ITEM_NONE is the same as BTN_DISABLED (255), we need a different value to help us track
+// that the player was swordless before like ITEM_NONE_FE (254)
+#define SWORDLESS_STATUS ITEM_NONE_FE
+
+// Restores swordless state when using the custom value for temp B and then clears temp B
+void Interface_RandoRestoreSwordless(void) {
+    if (IS_RANDO && gSaveContext.buttonStatus[0] == SWORDLESS_STATUS) {
+        gSaveContext.equips.buttonItems[0] = ITEM_NONE;
+        gSaveContext.buttonStatus[0] = BTN_ENABLED;
+    }
+}
+
+// FD (2026-07-12): Fierce Deity item-usability predicate. Single source of truth for FD graying, keyed on
+// SoH's vanilla item ids. Mirrors the RE's gItemDeityUsability table + Parameter_CanUseItem
+// (fd_build z_parameter.c:352 / 485), re-expressed because SoH keeps vanilla item numbering with the FD
+// items appended at 0x9E/0x9F (outside the RE's renumbered enum), so the raw table can't be indexed.
+// Only DEITY restricts (SoH has no goron/zora/deku player states); adult/child keep their normal age gating.
+// Returns 1 if usable in the current form, 0 if it should be grayed/denied.
+u8 Parameter_CanUseItem(u32 item) {
+    // The Fierce Deity's Mask itself always stays usable so you can revert while transformed. (Unlike the RE,
+    // SoH's ITEM_MASK_GORON/ZORA are the OoT *trade* masks, not transformation masks, so they are NOT
+    // force-allowed here -- they follow the deity table like every other non-usable item.)
+    if (item == ITEM_MASK_DEITY) {
+        return 1;
+    }
+    if (!LINK_IS_DEITY) {
+        return 1; // adult/child usability handled by the caller's normal age machinery
+    }
+    // Fierce Deity allowlist (== the RE gItemDeityUsability "1" entries): the FD sword, all bottles, the
+    // adult+child trade-quest items, and the diving scales. Everything else is denied (weapons, spells,
+    // Lens, ocarina, hammer, bombs, tunics, boots, shields, quivers, gauntlets, magic bean, wearable masks...).
+    if (item == ITEM_SWORD_DEITY) {
+        return 1;
+    }
+    // FD (2026-07-14): Fierce Deity is allowed to use Roc's Feather (the custom on-demand jump). It has no age
+    // gate of its own (z_play.c sets gItemAgeReqs[ITEM_ROCS_FEATHER] = AGE_REQ_NONE and RocsFeather.cpp gives FD
+    // the adult jump velocity); the ONLY thing blocking FD was this press gate returning 0, which also grayed the
+    // C-button and made the press fire the error tone before the jump VB hook could run.
+    if (item == ITEM_ROCS_FEATHER) {
+        return 1;
+    }
+    // FD (2026-07-15): "Unrestrict Items for FD" cheat (dropdown). 0 = Off (the vanilla FD allowlist below).
+    // 2 = "All (Except Swords + Shields)": un-gray EVERY item for FD except the vanilla swords/shields, like
+    // Timeless Equipment but for the deity form. 1 = "Deku Nuts, Bombs & Spells": additionally allow just those
+    // on top of the normal allowlist. (ITEM_SWORD_DEITY / ITEM_MASK_DEITY were already force-allowed above, so
+    // the deity blade and mask stay usable even at level 2.)
+    {
+        s32 fdUnrestrict = CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdUnrestrictItems"), 0);
+        if (fdUnrestrict >= 2) {
+            if (((item >= ITEM_SWORD_KOKIRI) && (item <= ITEM_SWORD_BGS)) ||
+                ((item >= ITEM_SHIELD_DEKU) && (item <= ITEM_SHIELD_MIRROR))) {
+                return 0; // swords + shields stay restricted
+            }
+            return 1;
+        }
+        if (fdUnrestrict == 1) {
+            if ((item == ITEM_NUT) || (item == ITEM_BOMB) || (item == ITEM_BOMBCHU) || (item == ITEM_DINS_FIRE) ||
+                (item == ITEM_FARORES_WIND) || (item == ITEM_NAYRUS_LOVE) || (item == ITEM_LENS)) {
+                return 1;
+            }
+            // otherwise fall through to the normal allowlist
+        }
+    }
+    // FD (2026-07-12) #4: the "FD Can Play Ocarina" cheat un-grays the ocarina for the deity form.
+    if ((item == ITEM_OCARINA_FAIRY) || (item == ITEM_OCARINA_TIME)) {
+        return CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdCanPlayOcarina"), 0) ? 1 : 0;
+    }
+    if ((item >= ITEM_BOTTLE) && (item <= ITEM_POE)) { // bottles: empty .. big poe (contiguous)
+        return 1;
+    }
+    if ((item >= ITEM_WEIRD_EGG) && (item <= ITEM_CLAIM_CHECK)) { // adult+child trade items...
+        if ((item >= ITEM_MASK_KEATON) && (item <= ITEM_MASK_TRUTH)) {
+            // ...the wearable/trade masks are interleaved in this id range; NOT usable unless the
+            // FD (2026-07-12) #3 "Forms Wear Trade Masks" cheat is on (then they don't gray out for forms).
+            return CVarGetInteger(CVAR_CHEAT("TransformationMasks.FormsWearTradeMasks"), 0) ? 1 : 0;
+        }
+        return 1;
+    }
+    if ((item == ITEM_SCALE_SILVER) || (item == ITEM_SCALE_GOLDEN)) {
+        return 1;
+    }
+    return 0;
+}
+
 void func_80083108(PlayState* play) {
     MessageContext* msgCtx = &play->msgCtx;
     Player* player = GET_PLAYER(play);
@@ -804,14 +889,20 @@ void func_80083108(PlayState* play) {
     s16 i;
     s16 sp28 = 0;
 
+    // Check for the player being swordless in rando (no item on B and swordless flag set)
+    // Child is always assumed due to not finding kokiri sword yet. Adult is only checked with MS shuffle on.
+    u8 randoIsSwordless = IS_RANDO && (LINK_IS_CHILD || Randomizer_GetSettingValue(RSK_SHUFFLE_MASTER_SWORD)) &&
+                          gSaveContext.equips.buttonItems[0] == ITEM_NONE && Flags_GetInfTable(INFTABLE_SWORDLESS);
+    u8 randoWasSwordlessBefore = IS_RANDO && gSaveContext.buttonStatus[0] == SWORDLESS_STATUS;
+    u8 randoCanTrackSwordless = randoIsSwordless && !randoWasSwordlessBefore;
+
     if ((gSaveContext.cutsceneIndex < 0xFFF0) ||
         ((play->sceneNum == SCENE_LON_LON_RANCH) && (gSaveContext.cutsceneIndex == 0xFFF0))) {
         gSaveContext.forceRisingButtonAlphas = 0;
 
         if ((player->stateFlags1 & PLAYER_STATE1_ON_HORSE) || (play->shootingGalleryStatus > 1) ||
             ((play->sceneNum == SCENE_BOMBCHU_BOWLING_ALLEY) && Flags_GetSwitch(play, 0x38))) {
-            if (GameInteractor_Should(VB_TEMP_B_TREAT_AS_OCCUPIED, gSaveContext.equips.buttonItems[0] != ITEM_NONE,
-                                      play)) {
+            if (gSaveContext.equips.buttonItems[0] != ITEM_NONE || randoCanTrackSwordless) {
                 gSaveContext.forceRisingButtonAlphas = 1;
 
                 if (gSaveContext.buttonStatus[0] == BTN_DISABLED) {
@@ -824,10 +915,13 @@ void func_80083108(PlayState* play) {
                 if ((gSaveContext.equips.buttonItems[0] != ITEM_SLINGSHOT) &&
                     (gSaveContext.equips.buttonItems[0] != ITEM_BOW) &&
                     (gSaveContext.equips.buttonItems[0] != ITEM_BOMBCHU) &&
-                    GameInteractor_Should(VB_TEMP_B_TREAT_AS_OCCUPIED, gSaveContext.equips.buttonItems[0] != ITEM_NONE,
-                                          play)) {
+                    (gSaveContext.equips.buttonItems[0] != ITEM_NONE || randoCanTrackSwordless)) {
                     gSaveContext.buttonStatus[0] = gSaveContext.equips.buttonItems[0];
-                    GameInteractor_Should(VB_TEMP_B_STASH_SWORDLESS, true, play);
+
+                    // Track swordless status for restoration later
+                    if (randoCanTrackSwordless) {
+                        gSaveContext.buttonStatus[0] = SWORDLESS_STATUS;
+                    }
 
                     if ((play->sceneNum == SCENE_BOMBCHU_BOWLING_ALLEY) && Flags_GetSwitch(play, 0x38)) {
                         gSaveContext.equips.buttonItems[0] = ITEM_BOMBCHU;
@@ -853,48 +947,53 @@ void func_80083108(PlayState* play) {
                         BTN_DISABLED;
                     gSaveContext.buttonStatus[5] = gSaveContext.buttonStatus[6] = gSaveContext.buttonStatus[7] =
                         gSaveContext.buttonStatus[8] = BTN_DISABLED;
-                    Interface_ChangeHudVisibilityMode(6);
+                    Interface_ChangeAlpha(6);
                 }
 
                 if (play->transitionMode != TRANS_MODE_OFF) {
-                    Interface_ChangeHudVisibilityMode(1);
+                    Interface_ChangeAlpha(1);
                 } else if (gSaveContext.minigameState == 1) {
-                    Interface_ChangeHudVisibilityMode(8);
+                    Interface_ChangeAlpha(8);
                 } else if (play->shootingGalleryStatus > 1) {
-                    Interface_ChangeHudVisibilityMode(8);
+                    Interface_ChangeAlpha(8);
                 } else if ((play->sceneNum == SCENE_BOMBCHU_BOWLING_ALLEY) && Flags_GetSwitch(play, 0x38)) {
-                    Interface_ChangeHudVisibilityMode(8);
+                    Interface_ChangeAlpha(8);
                 } else if (player->stateFlags1 & PLAYER_STATE1_ON_HORSE) {
-                    Interface_ChangeHudVisibilityMode(12);
+                    Interface_ChangeAlpha(12);
                 }
             } else {
                 if (player->stateFlags1 & PLAYER_STATE1_ON_HORSE) {
-                    Interface_ChangeHudVisibilityMode(12);
+                    Interface_ChangeAlpha(12);
                 }
             }
             // Don't hide the HUD in the Chamber of Sages when in Boss Rush.
         } else if (play->sceneNum == SCENE_CHAMBER_OF_THE_SAGES && !IS_BOSS_RUSH) {
-            Interface_ChangeHudVisibilityMode(1);
+            Interface_ChangeAlpha(1);
         } else if (play->sceneNum == SCENE_FISHING_POND) {
             gSaveContext.forceRisingButtonAlphas = 2;
             if (play->interfaceCtx.unk_260 != 0) {
                 if (gSaveContext.equips.buttonItems[0] != ITEM_FISHING_POLE) {
                     gSaveContext.buttonStatus[0] = gSaveContext.equips.buttonItems[0];
-                    GameInteractor_Should(VB_TEMP_B_STASH_SWORDLESS, true, play);
+
+                    // Track swordless status for restoration later
+                    if (randoCanTrackSwordless) {
+                        gSaveContext.buttonStatus[0] = SWORDLESS_STATUS;
+                    }
+
                     gSaveContext.equips.buttonItems[0] = ITEM_FISHING_POLE;
-                    gSaveContext.hudVisibilityMode = 0;
+                    gSaveContext.unk_13EA = 0;
                     Interface_LoadItemIcon1(play, 0);
-                    Interface_ChangeHudVisibilityMode(12);
+                    Interface_ChangeAlpha(12);
                 }
 
-                if (gSaveContext.hudVisibilityMode != 12) {
-                    Interface_ChangeHudVisibilityMode(12);
+                if (gSaveContext.unk_13EA != 12) {
+                    Interface_ChangeAlpha(12);
                 }
             } else if (gSaveContext.equips.buttonItems[0] == ITEM_FISHING_POLE) {
                 gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
-                gSaveContext.hudVisibilityMode = 0;
+                gSaveContext.unk_13EA = 0;
 
-                GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                Interface_RandoRestoreSwordless();
 
                 if (gSaveContext.equips.buttonItems[0] != ITEM_NONE) {
                     Interface_LoadItemIcon1(play, 0);
@@ -904,17 +1003,17 @@ void func_80083108(PlayState* play) {
                     gSaveContext.buttonStatus[3] = BTN_DISABLED;
                 gSaveContext.buttonStatus[5] = gSaveContext.buttonStatus[6] = gSaveContext.buttonStatus[7] =
                     gSaveContext.buttonStatus[8] = BTN_DISABLED;
-                Interface_ChangeHudVisibilityMode(50);
+                Interface_ChangeAlpha(50);
             } else {
                 if (gSaveContext.buttonStatus[0] == BTN_ENABLED) {
-                    gSaveContext.hudVisibilityMode = 0;
+                    gSaveContext.unk_13EA = 0;
                 }
 
                 gSaveContext.buttonStatus[0] = gSaveContext.buttonStatus[1] = gSaveContext.buttonStatus[2] =
                     gSaveContext.buttonStatus[3] = BTN_DISABLED;
                 gSaveContext.buttonStatus[5] = gSaveContext.buttonStatus[6] = gSaveContext.buttonStatus[7] =
                     gSaveContext.buttonStatus[8] = BTN_DISABLED;
-                Interface_ChangeHudVisibilityMode(50);
+                Interface_ChangeAlpha(50);
             }
         } else if (msgCtx->msgMode == MSGMODE_NONE) {
             if (GameInteractor_PacifistModeActive()) {
@@ -962,10 +1061,10 @@ void func_80083108(PlayState* play) {
                 }
 
                 if (sp28) {
-                    gSaveContext.hudVisibilityMode = 0;
+                    gSaveContext.unk_13EA = 0;
                 }
 
-                Interface_ChangeHudVisibilityMode(50);
+                Interface_ChangeAlpha(50);
             } else if ((player->stateFlags1 & PLAYER_STATE1_CLIMBING_LADDER) ||
                        (player->stateFlags2 & PLAYER_STATE2_CRAWLING)) {
                 if (gSaveContext.buttonStatus[0] != BTN_DISABLED) {
@@ -977,8 +1076,8 @@ void func_80083108(PlayState* play) {
                     gSaveContext.buttonStatus[6] = BTN_DISABLED;
                     gSaveContext.buttonStatus[7] = BTN_DISABLED;
                     gSaveContext.buttonStatus[8] = BTN_DISABLED;
-                    gSaveContext.hudVisibilityMode = 0;
-                    Interface_ChangeHudVisibilityMode(50);
+                    gSaveContext.unk_13EA = 0;
+                    Interface_ChangeAlpha(50);
                 }
             } else if ((gSaveContext.eventInf[0] & 0xF) == 1) {
                 if (player->stateFlags1 & PLAYER_STATE1_ON_HORSE) {
@@ -1003,7 +1102,7 @@ void func_80083108(PlayState* play) {
                             (gSaveContext.equips.buttonItems[0] != ITEM_SWORD_KNIFE)) {
                             gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
 
-                            GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                            Interface_RandoRestoreSwordless();
                         } else {
                             gSaveContext.buttonStatus[0] = gSaveContext.equips.buttonItems[0];
                         }
@@ -1033,22 +1132,21 @@ void func_80083108(PlayState* play) {
                 }
 
                 if (sp28) {
-                    gSaveContext.hudVisibilityMode = 0;
+                    gSaveContext.unk_13EA = 0;
                 }
 
-                Interface_ChangeHudVisibilityMode(50);
+                Interface_ChangeAlpha(50);
             } else {
                 if (interfaceCtx->restrictions.bButton == 0) {
                     if ((gSaveContext.equips.buttonItems[0] == ITEM_SLINGSHOT) ||
                         (gSaveContext.equips.buttonItems[0] == ITEM_BOW) ||
                         (gSaveContext.equips.buttonItems[0] == ITEM_BOMBCHU) ||
                         (gSaveContext.equips.buttonItems[0] == ITEM_NONE)) {
-                        if (GameInteractor_Should(VB_TEMP_B_SHOULD_RESTORE,
-                                                  (gSaveContext.equips.buttonItems[0] != ITEM_NONE) ||
-                                                      (gSaveContext.infTable[29] == 0))) {
+                        if ((gSaveContext.equips.buttonItems[0] != ITEM_NONE) || (gSaveContext.infTable[29] == 0) ||
+                            randoWasSwordlessBefore) {
                             gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
 
-                            GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                            Interface_RandoRestoreSwordless();
 
                             sp28 = 1;
 
@@ -1071,12 +1169,11 @@ void func_80083108(PlayState* play) {
                         (gSaveContext.equips.buttonItems[0] == ITEM_BOW) ||
                         (gSaveContext.equips.buttonItems[0] == ITEM_BOMBCHU) ||
                         (gSaveContext.equips.buttonItems[0] == ITEM_NONE)) {
-                        if (GameInteractor_Should(VB_TEMP_B_SHOULD_RESTORE,
-                                                  (gSaveContext.equips.buttonItems[0] != ITEM_NONE) ||
-                                                      (gSaveContext.infTable[29] == 0))) {
+                        if ((gSaveContext.equips.buttonItems[0] != ITEM_NONE) || (gSaveContext.infTable[29] == 0) ||
+                            randoWasSwordlessBefore) {
                             gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
 
-                            GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                            Interface_RandoRestoreSwordless();
 
                             sp28 = 1;
 
@@ -1305,10 +1402,62 @@ void func_80083108(PlayState* play) {
         }
     }
 
+    // FD (2026-07-12): while Fierce Deity, gray out (BTN_DISABLED) every C-button / D-pad item the deity form
+    // can't use, mirroring the RE's per-button loop (fd_build z_parameter.c:1246-1256). Runs LAST so it
+    // overrides vanilla's "equipment on C-buttons is always enabled" -> FD's D-pad-assigned boots/tunics gray
+    // too (#10). buttonStatus==BTN_DISABLED is what func_80082644 dims to alpha 70 (the age-gate gray look) --
+    // and func_80082644 reads buttonStatus at HUD-DRAW time, i.e. AFTER this, so setting it here is sufficient
+    // to dim just those buttons.
+    //
+    // #1 FIX: do NOT flag sp28 for these. The vanilla button loops above re-ENABLE FD-unusable buttons every
+    // frame (they can't know about the deity restriction) and flag sp28 on the disabled->enabled flip; this
+    // loop re-disables them. That perpetual oscillation kept sp28=1 every frame -> Interface_ChangeAlpha(50) +
+    // unk_13EA=0 re-triggered the HUD alpha transition continuously -> the WHOLE HUD faded transparent (B and
+    // the FD mask included). Because the per-button gray is driven purely by buttonStatus (not the global
+    // alpha), we suppress the FD-induced sp28 so only the individual unusable C-buttons dim, HUD stays solid.
+    if (LINK_IS_DEITY) {
+        for (i = 1; i < ARRAY_COUNT(gSaveContext.equips.buttonItems); i++) {
+            u8 btnItem = gSaveContext.equips.buttonItems[i];
+            if ((btnItem != ITEM_NONE) && !Parameter_CanUseItem(btnItem)) {
+                gSaveContext.buttonStatus[BUTTON_STATUS_INDEX(i)] = BTN_DISABLED;
+            }
+        }
+        sp28 = 0; // suppress the FD-oscillation full-HUD fade (see note above)
+    }
+
+    // FD (2026-07-12) zone gate: dim the Fierce Deity's Mask C-button/D-pad slot while HUMAN/CHILD and OUT of
+    // the FD-usable zone (not a boss lair / fishing hole, cheat off) -- like a weapon C-button being grayed in a
+    // safe room. buttonStatus only -> HUD dim (func_80082644 alpha 70); the kaleido MENU is unaffected (the mask
+    // stays assignable + un-grayed). Runs regardless of LINK_IS_DEITY (you're human before transforming); while
+    // Deity the mask stays lit so the revert is always available. ITEM_MASK_DEITY is a custom id no vanilla
+    // range touches, so this loop must set BOTH states.
+    //
+    // ★HUD-TRANSPARENCY FIX: when we force the mask DISABLED, the vanilla button loops ABOVE re-ENABLE this
+    // custom item every frame (0x9F matches no restriction range, so the `restrictions.all==0` default-enable
+    // loop sets it BTN_ENABLED) and flag sp28 on the disabled->enabled flip. That perpetual oscillation kept
+    // sp28=1 every frame -> Interface_ChangeAlpha + unk_13EA=0 re-triggered the HUD alpha transition continuously
+    // -> the WHOLE HUD faded transparent (the reported bug: adult Link, FD mask on C-Right, ToT). The per-button
+    // gray is driven purely by buttonStatus (func_80082644, read at HUD-draw = after this), so we suppress the
+    // FD-mask-oscillation sp28 -- only that C-button dims, the HUD stays solid. (Same fix as the LINK_IS_DEITY
+    // C-button loop above.)
+    {
+        u8 fdAllowed = Player_IsFierceDeityAllowed(play);
+        for (i = 1; i < ARRAY_COUNT(gSaveContext.equips.buttonItems); i++) {
+            if (gSaveContext.equips.buttonItems[i] == ITEM_MASK_DEITY) {
+                if (!LINK_IS_DEITY && !fdAllowed) {
+                    gSaveContext.buttonStatus[BUTTON_STATUS_INDEX(i)] = BTN_DISABLED;
+                    sp28 = 0; // suppress the FD-mask-oscillation full-HUD fade
+                } else {
+                    gSaveContext.buttonStatus[BUTTON_STATUS_INDEX(i)] = BTN_ENABLED;
+                }
+            }
+        }
+    }
+
     if (sp28) {
-        gSaveContext.hudVisibilityMode = 0;
+        gSaveContext.unk_13EA = 0;
         if ((play->transitionTrigger == TRANS_TRIGGER_OFF) && (play->transitionMode == TRANS_MODE_OFF)) {
-            Interface_ChangeHudVisibilityMode(50);
+            Interface_ChangeAlpha(50);
             osSyncPrintf("????????  alpha_change( 50 );  ?????\n");
         } else {
             osSyncPrintf("game_play->fade_direction || game_play->fbdemo_wipe_modem");
@@ -1737,13 +1886,13 @@ void func_80084BF4(PlayState* play, u16 flag) {
                 (gSaveContext.equips.buttonItems[0] == ITEM_BOMBCHU) ||
                 (gSaveContext.equips.buttonItems[0] == ITEM_FISHING_POLE)) {
                 gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
-                GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                Interface_RandoRestoreSwordless();
                 Interface_LoadItemIcon1(play, 0);
             }
         } else if (gSaveContext.equips.buttonItems[0] == ITEM_NONE) {
             if ((gSaveContext.equips.buttonItems[0] != ITEM_NONE) || (gSaveContext.infTable[29] == 0)) {
                 gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
-                GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                Interface_RandoRestoreSwordless();
                 Interface_LoadItemIcon1(play, 0);
             }
         }
@@ -1752,7 +1901,7 @@ void func_80084BF4(PlayState* play, u16 flag) {
             gSaveContext.buttonStatus[3] = BTN_ENABLED;
         gSaveContext.buttonStatus[5] = gSaveContext.buttonStatus[6] = gSaveContext.buttonStatus[7] =
             gSaveContext.buttonStatus[8] = BTN_ENABLED;
-        Interface_ChangeHudVisibilityMode(7);
+        Interface_ChangeAlpha(7);
     } else {
         gSaveContext.buttonStatus[0] = gSaveContext.buttonStatus[1] = gSaveContext.buttonStatus[2] =
             gSaveContext.buttonStatus[3] = BTN_ENABLED;
@@ -1847,6 +1996,19 @@ u8 Return_Item(u8 itemID, ModIndex modId, ItemID returnItem) {
  * @return u8
  */
 u8 Item_Give(PlayState* play, u8 item) {
+    // FD (2026-07-11): ITEM_MASK_DEITY (0x9F) is a custom item with no gItemSlots[] entry; the
+    // vanilla storage path below would index out of bounds (gItemSlots[] has only 0x36 entries) and
+    // corrupt gSaveContext. Intercept it here: equip the mask directly to a free C-button so it can
+    // be used to transform into Fierce Deity, then return safely.
+    if (item == ITEM_MASK_DEITY) {
+        // FD (2026-07-11): mark obtained (gates the kaleido first-bottle-slot cycle + the item tracker).
+        // Do NOT force the mask onto a C-button here -- that produced the unwanted C-Right auto-assign.
+        // The mask is accessed through the kaleido bottle-slot cycle (press A on the first bottle slot),
+        // then the player equips it to a C-button of their choice.
+        gSaveContext.ship.hasFierceDeityMask = 1;
+        return Return_Item(item, MOD_NONE, ITEM_NONE);
+    }
+
     // prevents getting sticks without the bag in case something got missed
     if (IS_RANDO && (item == ITEM_STICK || item == ITEM_STICKS_5 || item == ITEM_STICKS_10) &&
         Randomizer_GetSettingValue(RSK_SHUFFLE_DEKU_STICK_BAG) && CUR_UPG_VALUE(UPG_STICKS) == 0) {
@@ -2383,7 +2545,7 @@ u8 Item_Give(PlayState* play, u8 item) {
                     }
 
                     gSaveContext.inventory.items[temp + i] = item;
-                    return Return_Item(item, MOD_NONE, ITEM_NONE);
+                    break;
                 }
             }
         } else {
@@ -2393,14 +2555,11 @@ u8 Item_Give(PlayState* play, u8 item) {
             for (i = 0; i < 4; i++) {
                 if (gSaveContext.inventory.items[temp + i] == ITEM_NONE) {
                     gSaveContext.inventory.items[temp + i] = item;
-                    return Return_Item(item, MOD_NONE, ITEM_NONE);
+                    break;
                 }
             }
         }
-
-        if (IS_RANDO) {
-            return Return_Item(item, MOD_NONE, ITEM_NONE);
-        }
+        return Return_Item(item, MOD_NONE, ITEM_NONE);
     } else if ((item >= ITEM_WEIRD_EGG) && (item <= ITEM_CLAIM_CHECK)) {
         if (GameInteractor_Should(VB_POACHERS_SAW_SET_DEKU_NUT_UPGRADE_FLAG, item == ITEM_SAW)) {
             Flags_SetItemGetInf(ITEMGETINF_OBTAINED_NUT_UPGRADE_FROM_STAGE);
@@ -2675,11 +2834,8 @@ void Inventory_UpdateBottleItem(PlayState* play, u8 item, u8 button) {
                  gSaveContext.inventory.items[gSaveContext.equips.cButtonSlots[button - 1]]);
 
     // Special case to only empty half of a Lon Lon Milk Bottle
-    if (GameInteractor_Should(
-            VB_EMPTY_BOTTLE_TO_HALF_MILK,
-            (gSaveContext.inventory.items[gSaveContext.equips.cButtonSlots[button - 1]] == ITEM_MILK_BOTTLE) &&
-                (item == ITEM_BOTTLE),
-            button, item)) {
+    if ((gSaveContext.inventory.items[gSaveContext.equips.cButtonSlots[button - 1]] == ITEM_MILK_BOTTLE) &&
+        (item == ITEM_BOTTLE)) {
         item = ITEM_MILK_HALF;
     }
 
@@ -3131,6 +3287,23 @@ s32 Magic_RequestChange(PlayState* play, s16 amount, s16 type) {
                 return true;
             }
             break;
+
+        case MAGIC_CONSUME_DEITY_BEAM:
+            // FD (2026-07-11): Fierce Deity sword beam -- consume magic immediately (RE z_parameter.c:2928).
+            // MM's Magic_Consume(1, DEITY_BEAM) subtracts `amount` cleanly in one hit (CONSUME_NOW would drain
+            // 2/frame toward a target and misfires on an odd cost of 1). Only fires from the idle/lens states.
+            if ((gSaveContext.magicState == MAGIC_STATE_IDLE) ||
+                (gSaveContext.magicState == MAGIC_STATE_CONSUME_LENS)) {
+                if (gSaveContext.magicState == MAGIC_STATE_CONSUME_LENS) {
+                    play->actorCtx.lensActive = false;
+                }
+                gSaveContext.magic -= amount;
+                return true;
+            } else {
+                Audio_PlaySoundGeneral(NA_SE_SY_ERROR, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
+                                       &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
+                return false;
+            }
     }
 
     return 0;
@@ -3209,7 +3382,7 @@ void Interface_UpdateMagicBar(PlayState* play) {
         case MAGIC_STATE_FILL:
             gSaveContext.magic += 4;
 
-            if (gSaveContext.gameMode == GAMEMODE_NORMAL && gSaveContext.sceneLayer < 4) {
+            if (gSaveContext.gameMode == GAMEMODE_NORMAL && gSaveContext.sceneSetupIndex < 4) {
                 Audio_PlaySoundGeneral(NA_SE_SY_GAUGE_UP - SFX_FLAG, &gSfxDefaultPos, 4, &gSfxDefaultFreqAndVolScale,
                                        &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
             }
@@ -3637,7 +3810,7 @@ void Interface_DrawEnemyHealthBar(TargetContext* targetCtx, PlayState* play) {
 
         if (anchorType == ENEMYHEALTH_ANCHOR_ACTOR) {
             // Get actor projected position
-            Actor_ProjectPos(play, &targetCtx->targetCenterPos, &projTargetCenter, &projTargetCappedInvW);
+            func_8002BE04(play, &targetCtx->targetCenterPos, &projTargetCenter, &projTargetCappedInvW);
 
             projTargetCenter.x = (SCREEN_WIDTH / 2) * (projTargetCenter.x * projTargetCappedInvW);
             projTargetCenter.x = projTargetCenter.x * (CVarGetInteger(CVAR_ENHANCEMENT("MirroredWorld"), 0) ? -1 : 1);
@@ -4202,8 +4375,7 @@ void Interface_DrawItemButtons(PlayState* play) {
             // C-Up Button Texture, Color & Label (Navi Text)
             gDPPipeSync(OVERLAY_DISP++);
 
-            if ((gSaveContext.hudVisibilityMode == 1) || (gSaveContext.hudVisibilityMode == 2) ||
-                (gSaveContext.hudVisibilityMode == 5)) {
+            if ((gSaveContext.unk_13EA == 1) || (gSaveContext.unk_13EA == 2) || (gSaveContext.unk_13EA == 5)) {
                 temp = 0;
             } else if ((player->stateFlags1 & PLAYER_STATE1_CLIMBING_LADDER) ||
                        (Player_GetEnvironmentalHazard(play) == 4) || (player->stateFlags2 & PLAYER_STATE2_CRAWLING)) {
@@ -5400,7 +5572,7 @@ void Interface_Draw(PlayState* play) {
                 gSPMatrix(OVERLAY_DISP++, interfaceCtx->view.projectionFlippedPtr,
                           G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
             }
-            Attention_Draw(&play->actorCtx.targetCtx, play); // Draw Z-Target
+            func_8002C124(&play->actorCtx.targetCtx, play); // Draw Z-Target
             if (CVarGetInteger(CVAR_ENHANCEMENT("MirroredWorld"), 0)) {
                 gSPMatrix(OVERLAY_DISP++, interfaceCtx->view.projectionPtr,
                           G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
@@ -5781,7 +5953,7 @@ void Interface_Draw(PlayState* play) {
         if ((play->pauseCtx.state == 0) && (play->pauseCtx.debugState == 0)) {
             if (gSaveContext.minigameState != 1) {
                 // Carrots rendering if the action corresponds to riding a horse
-                if (interfaceCtx->unk_1EE == 8 && GameInteractor_Should(VB_DRAW_EPONA_BOOST_CARROTS, true)) {
+                if (interfaceCtx->unk_1EE == 8 && !CVarGetInteger(CVAR_CHEAT("InfiniteEponaBoost"), 0)) {
                     // Load Carrot Icon
                     gDPLoadTextureBlock(OVERLAY_DISP++, gCarrotIconTex, G_IM_FMT_RGBA, G_IM_SIZ_32b, 16, 16, 0,
                                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
@@ -5906,7 +6078,7 @@ void Interface_Draw(PlayState* play) {
                 (gSaveContext.equips.buttonItems[0] != ITEM_SWORD_KNIFE)) {
                 if (gSaveContext.buttonStatus[0] != BTN_ENABLED) {
                     gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
-                    GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+                    Interface_RandoRestoreSwordless();
                 } else {
                     gSaveContext.equips.buttonItems[0] = ITEM_NONE;
                 }
@@ -6476,7 +6648,7 @@ void Interface_DrawTotalGameplayTimer(PlayState* play) {
 
 void Interface_Update(PlayState* play) {
     static u8 D_80125B60 = 0;
-    static s16 sPrevTimeSpeed = 0;
+    static s16 sPrevTimeIncrement = 0;
     MessageContext* msgCtx = &play->msgCtx;
     InterfaceContext* interfaceCtx = &play->interfaceCtx;
     Player* player = GET_PLAYER(play);
@@ -6514,8 +6686,8 @@ void Interface_Update(PlayState* play) {
     }
 
     if ((play->pauseCtx.state == 0) && (play->pauseCtx.debugState == 0)) {
-        if ((gSaveContext.minigameState == 1) || (gSaveContext.sceneLayer < 4) ||
-            ((play->sceneNum == SCENE_LON_LON_RANCH) && (gSaveContext.sceneLayer == 4))) {
+        if ((gSaveContext.minigameState == 1) || (gSaveContext.sceneSetupIndex < 4) ||
+            ((play->sceneNum == SCENE_LON_LON_RANCH) && (gSaveContext.sceneSetupIndex == 4))) {
             if ((msgCtx->msgMode == MSGMODE_NONE) ||
                 ((msgCtx->msgMode != MSGMODE_NONE) && (play->sceneNum == SCENE_BOMBCHU_BOWLING_ALLEY))) {
                 if (play->gameOverCtx.state == GAMEOVER_INACTIVE) {
@@ -6525,7 +6697,7 @@ void Interface_Update(PlayState* play) {
         }
     }
 
-    switch (gSaveContext.nextHudVisibilityMode) {
+    switch (gSaveContext.unk_13E8) {
         case 1:
         case 2:
         case 3:
@@ -6539,20 +6711,20 @@ void Interface_Update(PlayState* play) {
         case 11:
         case 12:
         case 13:
-            alpha = 255 - (gSaveContext.hudVisibilityModeTimer << 5);
+            alpha = 255 - (gSaveContext.unk_13EC << 5);
             if (alpha < 0) {
                 alpha = 0;
             }
 
             func_80082850(play, alpha);
-            gSaveContext.hudVisibilityModeTimer++;
+            gSaveContext.unk_13EC++;
 
             if (alpha == 0) {
-                gSaveContext.nextHudVisibilityMode = 0;
+                gSaveContext.unk_13E8 = 0;
             }
             break;
         case 50:
-            alpha = 255 - (gSaveContext.hudVisibilityModeTimer << 5);
+            alpha = 255 - (gSaveContext.unk_13EC << 5);
             if (alpha < 0) {
                 alpha = 0;
             }
@@ -6607,16 +6779,16 @@ void Interface_Update(PlayState* play) {
                     break;
             }
 
-            gSaveContext.hudVisibilityModeTimer++;
+            gSaveContext.unk_13EC++;
             if (alpha1 == 0xFF) {
-                gSaveContext.nextHudVisibilityMode = 0;
+                gSaveContext.unk_13E8 = 0;
             }
 
             break;
         case 52:
-            gSaveContext.nextHudVisibilityMode = 1;
+            gSaveContext.unk_13E8 = 1;
             func_80082850(play, 0);
-            gSaveContext.nextHudVisibilityMode = 0;
+            gSaveContext.unk_13E8 = 0;
         default:
             break;
     }
@@ -6848,17 +7020,17 @@ void Interface_Update(PlayState* play) {
                 }
 
                 gSaveContext.sunsSongState = SUNSSONG_SPEED_TIME;
-                sPrevTimeSpeed = gTimeSpeed;
-                gTimeSpeed = 400;
+                sPrevTimeIncrement = gTimeIncrement;
+                gTimeIncrement = 400;
             } else if (D_80125B60 == 0) {
                 if ((gSaveContext.dayTime >= 0x4555) && (gSaveContext.dayTime <= 0xC001)) {
                     gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
-                    gTimeSpeed = sPrevTimeSpeed;
+                    gTimeIncrement = sPrevTimeIncrement;
                     play->msgCtx.ocarinaMode = OCARINA_MODE_04;
                 }
             } else if (gSaveContext.dayTime > 0xC001) {
                 gSaveContext.sunsSongState = SUNSSONG_INACTIVE;
-                gTimeSpeed = sPrevTimeSpeed;
+                gTimeIncrement = sPrevTimeIncrement;
                 play->msgCtx.ocarinaMode = OCARINA_MODE_04;
             }
         } else if ((play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_1) &&
@@ -6867,12 +7039,12 @@ void Interface_Update(PlayState* play) {
                 gSaveContext.nextDayTime = 0;
                 play->transitionType = TRANS_TYPE_FADE_BLACK_FAST;
                 gSaveContext.nextTransitionType = TRANS_TYPE_FADE_BLACK;
-                play->haltAllActors = 1;
+                play->unk_11DE9 = 1;
             } else {
                 gSaveContext.nextDayTime = 0x8001;
                 play->transitionType = TRANS_TYPE_FADE_WHITE_FAST;
                 gSaveContext.nextTransitionType = TRANS_TYPE_FADE_WHITE;
-                play->haltAllActors = 1;
+                play->unk_11DE9 = 1;
             }
 
             if (play->sceneNum == SCENE_HAUNTED_WASTELAND) {

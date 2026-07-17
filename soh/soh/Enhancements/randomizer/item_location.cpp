@@ -3,8 +3,6 @@
 #include "logic.h"
 #include "3drando/random.hpp"
 
-#include <spdlog/spdlog.h>
-
 namespace Rando {
 ItemLocation::ItemLocation() : rc(RC_UNKNOWN_CHECK) {
 }
@@ -124,11 +122,6 @@ void ItemLocation::SetPrice(const uint16_t price_) {
 
 bool ItemLocation::HasCustomPrice() const {
     return hasCustomPrice;
-}
-
-bool ItemLocation::CanBePurchased() const {
-    const RandomizerCheckType checkType = StaticData::GetLocation(rc)->GetRCType();
-    return checkType == RCTYPE_SHOP || checkType == RCTYPE_SCRUB || checkType == RCTYPE_MERCHANT;
 }
 
 void ItemLocation::SetCustomPrice(const uint16_t price_) {

@@ -3,6 +3,7 @@
 #include "randomizer_item_tracker.h"
 #include "randomizerTypes.h"
 #include "soh/OTRGlobals.h"
+#include "soh/cvar_prefixes.h"
 #include "soh/SaveManager.h"
 #include "soh/ResourceManagerHelpers.h"
 #include "soh/SohGui/UIWidgets.hpp"
@@ -21,10 +22,10 @@
 #include <sstream>
 #include <vector>
 #include <set>
+#include <libultraship/libultraship.h>
 #include <libultraship/controller/controldeck/ControlDeck.h>
 #include "location.h"
 #include "item_location.h"
-#include "randomizer_check_objects.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "z64item.h"
 
@@ -1633,23 +1634,23 @@ void LoadSettings() {
     }
 
     switch (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_GANONS_BOSS_KEY)) {
-        case RO_GANON_BOSS_KEY_STONES:
-            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_STONES);
+        case RO_GANON_BOSS_KEY_LACS_STONES:
+            Rando::Context::GetInstance()->LACSCondition(RO_LACS_STONES);
             break;
-        case RO_GANON_BOSS_KEY_MEDALLIONS:
-            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_MEDALLIONS);
+        case RO_GANON_BOSS_KEY_LACS_MEDALLIONS:
+            Rando::Context::GetInstance()->LACSCondition(RO_LACS_MEDALLIONS);
             break;
-        case RO_GANON_BOSS_KEY_REWARDS:
-            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_REWARDS);
+        case RO_GANON_BOSS_KEY_LACS_REWARDS:
+            Rando::Context::GetInstance()->LACSCondition(RO_LACS_REWARDS);
             break;
-        case RO_GANON_BOSS_KEY_DUNGEONS:
-            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_DUNGEONS);
+        case RO_GANON_BOSS_KEY_LACS_DUNGEONS:
+            Rando::Context::GetInstance()->LACSCondition(RO_LACS_DUNGEONS);
             break;
-        case RO_GANON_BOSS_KEY_TOKENS:
-            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_TOKENS);
+        case RO_GANON_BOSS_KEY_LACS_TOKENS:
+            Rando::Context::GetInstance()->LACSCondition(RO_LACS_TOKENS);
             break;
         default:
-            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_NONE);
+            Rando::Context::GetInstance()->LACSCondition(RO_LACS_VANILLA);
             break;
     }
 }
@@ -1672,11 +1673,11 @@ bool IsCheckShuffled(RandomizerCheck rc) {
                 (showShops &&
                  OTRGlobals::Instance->gRandomizer->IdentifyShopItem(loc->GetScene(), loc->GetActorParams() + 1)
                          .enGirlAShopItem == 50)) &&
-               (rc != RC_WINCON) && (rc != RC_GANON) &&
+               (rc != RC_TRIFORCE_COMPLETED) && (rc != RC_GANON) &&
                (loc->GetRCType() != RCTYPE_SCRUB || showScrubs ||
                 (showMajorScrubs && (rc == RC_LW_DEKU_SCRUB_NEAR_BRIDGE || // The 3 scrubs that are always randomized
                                      rc == RC_HF_DEKU_SCRUB_GROTTO || rc == RC_LW_DEKU_SCRUB_GROTTO_FRONT))) &&
-               ((loc->GetRCType() != RCTYPE_MERCHANT || (showMerchants && rc != RC_ZR_MAGIC_BEAN_SALESMAN)) ||
+               ((loc->GetRCType() != RCTYPE_MERCHANT || showMerchants) ||
                 (rc == RC_ZR_MAGIC_BEAN_SALESMAN && showBeans)) &&
                (loc->GetRCType() != RCTYPE_BEGGAR || showBeggar) &&
                (loc->GetRCType() != RCTYPE_SONG_LOCATION || showSongs) &&
@@ -2073,7 +2074,7 @@ void DrawLocation(RandomizerCheck rc) {
                     } else if (revealItemName) {
                         txt = itemLoc->GetPlacedItem().GetName().GetForLanguage(gSaveContext.language);
                     }
-                    if (itemLoc->CanBePurchased() && IsVisibleInCheckTracker(rc) && status == RCSHOW_IDENTIFIED) {
+                    if (IsVisibleInCheckTracker(rc) && status == RCSHOW_IDENTIFIED) {
                         auto price = OTRGlobals::Instance->gRandoContext->GetItemLocation(rc)->GetPrice();
                         txt = !txt.empty() ? fmt::format("{} - {}", txt, price) : fmt::format("{}", price);
                     }
@@ -2274,10 +2275,10 @@ void RecalculateAvailableChecks(RandomizerRegion startingRegion /* = RR_ROOT */,
     availableChecksStartingAgeTime = startingAgeTime;
 }
 
-void LoadFromPreset(const nlohmann::json& info) {
+void LoadFromPreset(nlohmann::json info) {
     presetLoaded = true;
-    presetPos = { info.at("pos").at("x"), info.at("pos").at("y") };
-    presetSize = { info.at("size").at("width"), info.at("size").at("height") };
+    presetPos = { info["pos"]["x"], info["pos"]["y"] };
+    presetSize = { info["size"]["width"], info["size"]["height"] };
 }
 
 void CheckTrackerWindow::Draw() {

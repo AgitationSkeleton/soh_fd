@@ -6,7 +6,7 @@
 #include <soh/GameVersions.h>
 #include "soh/ResourceManagerHelpers.h"
 #include "UIWidgets.hpp"
-#include <ship/controller/controldeck/ControlDeck.h>
+#include <spdlog/fmt/fmt.h>
 
 extern "C" {
 #include "include/z64audio.h"

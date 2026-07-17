@@ -20,9 +20,11 @@
 #include "overlays/misc/ovl_kaleido_scope/z_kaleido_scope.h"
 #include "objects/gameplay_keep/gameplay_keep.h"
 #include "objects/object_link_child/object_link_child.h"
+#include "objects/object_link_deity/object_link_deity.h" // FD (2026-07-11) Task 1: mask-transform anims + on-face mask
 #include <soh/Enhancements/custom-message/CustomMessageTypes.h>
 #include "soh/Enhancements/item-tables/ItemTableTypes.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
+#include "soh/Enhancements/FierceDeityMaskCycle.h"
 #include "soh/Enhancements/randomizer/randomizer_entrance.h"
 #include "soh/Enhancements/cosmetics/cosmeticsTypes.h"
 #include "soh/Enhancements/enhancementTypes.h"
@@ -154,6 +156,10 @@ s32 func_80835B60(Player* this, PlayState* play); // Boomerang active
 s32 func_80835C08(Player* this, PlayState* play);
 
 void Player_UseItem(PlayState* play, Player* this, s32 item);
+void Player_ChangeAge(Player* this, PlayState* play, s16 age); // FD (2026-07-11) 4g
+void Player_SetupMaskTransformation(PlayState* play, Player* this, u8 nextForm); // FD (2026-07-11) Task 1
+void Player_MaskTransformation(Player* this, PlayState* play);                    // FD (2026-07-11) Task 1 (action fn)
+void func_80839FFC(Player* this, PlayState* play);                               // FD (2026-07-11) Task 1 (fwd; defined below)
 void func_80839F90(Player* this, PlayState* play);
 s32 func_8083C61C(PlayState* play, Player* this);
 void Player_StartMode_Idle(PlayState* play, Player* this);
@@ -323,7 +329,7 @@ void Player_Action_8084EED8(Player* this, PlayState* play);
 void Player_Action_8084EFC0(Player* this, PlayState* play);
 void Player_Action_ExchangeItem(Player* this, PlayState* play);
 void Player_Action_SlideOnSlope(Player* this, PlayState* play);
-void Player_Action_WaitForCutscene(Player* this, PlayState* play);
+void Player_Action_8084F608(Player* this, PlayState* play);
 void Player_Action_8084F698(Player* this, PlayState* play);
 void Player_Action_8084F710(Player* this, PlayState* play);
 void Player_Action_8084F88C(Player* this, PlayState* play);
@@ -522,6 +528,58 @@ static PlayerAgeProperties sAgeProperties[] = {
         { &gPlayerAnim_link_normal_Fclimb_sideL, &gPlayerAnim_link_normal_Fclimb_sideR }, // unk_BC
         { &gPlayerAnim_clink_normal_climb_endAL, &gPlayerAnim_clink_normal_climb_endAR }, // unk_C4
         { &gPlayerAnim_clink_normal_climb_endBR, &gPlayerAnim_clink_normal_climb_endBL }, // unk_CC
+    },
+    { // FD (2026-07-11) fierce deity — ported from SOURCE z_player.c:496-547 (climb/demo anims = adult's)
+        84.0f,            // ceilingCheckHeight
+        90.0f,            // unk_04
+        1.5f,             // unk_08
+        166.5f,           // unk_0C
+        105.0f,           // unk_10
+        119.0f,           // unk_14
+        88.5f,            // unk_18
+        61.5f,            // unk_1C
+        28.5f,            // unk_20
+        54.0f,            // unk_24
+        75.0f,            // unk_28
+        84.0f,            // unk_2C
+        102.0f,           // unk_30
+        70.0f,            // unk_34
+        27.0f,            // wallCheckRadius
+        24.75f,           // unk_3C
+        105.0f,           // unk_40
+        { 9, 4671, 359 }, // unk_44
+        {
+            { 8, 4694, 380 },
+            { 9, 6122, 359 },
+            { 8, 4694, 380 },
+            { 9, 6122, 359 },
+        }, // unk_4A
+        {
+            { 9, 6122, 359 },
+            { 9, 7693, 380 },
+            { 9, 6122, 359 },
+            { 9, 7693, 380 },
+        }, // unk_62
+        {
+            { 8, 4694, 380 },
+            { 9, 6122, 359 },
+        }, // unk_7A
+        {
+            { -1592, 4694, 380 },
+            { -1591, 6122, 359 },
+        },                                     // unk_86
+        0,                                     // unk_92
+        0x80,                                  // unk_94
+        &gPlayerAnim_link_demo_Tbox_open,      // unk_98
+        &gPlayerAnim_link_demo_back_to_past,   // unk_9C
+        &gPlayerAnim_link_demo_return_to_past, // unk_A0
+        &gPlayerAnim_link_normal_climb_startA, // unk_A4
+        &gPlayerAnim_link_normal_climb_startB, // unk_A8
+        { &gPlayerAnim_link_normal_climb_upL, &gPlayerAnim_link_normal_climb_upR, &gPlayerAnim_link_normal_Fclimb_upL,
+          &gPlayerAnim_link_normal_Fclimb_upR },                                          // unk_AC
+        { &gPlayerAnim_link_normal_Fclimb_sideL, &gPlayerAnim_link_normal_Fclimb_sideR }, // unk_BC
+        { &gPlayerAnim_link_normal_climb_endAL, &gPlayerAnim_link_normal_climb_endAR },   // unk_C4
+        { &gPlayerAnim_link_normal_climb_endBR, &gPlayerAnim_link_normal_climb_endBL },   // unk_CC
     },
 };
 
@@ -1214,6 +1272,10 @@ static s8 sItemActions[] = {
     PLAYER_IA_SWORD_KOKIRI,        // ITEM_SWORD_KOKIRI
     PLAYER_IA_SWORD_MASTER,        // ITEM_SWORD_MASTER
     PLAYER_IA_SWORD_BIGGORON,      // ITEM_SWORD_BIGGORON
+    // FD (2026-07-11): array physically covered only 0x00..0x3D. Designated initializers extend it to
+    // cover ITEM_MASK_DEITY(0x9F); the gap 0x3E..0x9D auto-zeros to PLAYER_IA_NONE(0). See 4b.
+    [ITEM_SWORD_DEITY] = PLAYER_IA_SWORD_BIGGORON, // FD 0x9E
+    [ITEM_MASK_DEITY] = PLAYER_IA_MASK_DEITY,      // FD 0x9F
 };
 
 static s32 (*sItemActionUpdateFuncs[])(Player* this, PlayState* play) = {
@@ -1717,7 +1779,7 @@ void func_80832630(PlayState* play) {
 
 void Player_RequestRumble(Player* this, s32 sourceStrength, s32 duration, s32 decreaseRate, s32 distSq) {
     if (this->actor.category == ACTORCAT_PLAYER) {
-        Rumble_Request(distSq, sourceStrength, duration, decreaseRate);
+        func_800AA000(distSq, sourceStrength, duration, decreaseRate);
     }
 }
 
@@ -2139,7 +2201,8 @@ LinkAnimationHeader* func_80833438(Player* this) {
     if (this->unk_890 != 0) {
         return GET_PLAYER_ANIM(PLAYER_ANIMGROUP_damage_run, this->modelAnimType);
     } else if (!(this->stateFlags1 & (PLAYER_STATE1_IN_WATER | PLAYER_STATE1_IN_CUTSCENE)) &&
-               (this->currentBoots == PLAYER_BOOTS_IRON)) {
+               (this->currentBoots == PLAYER_BOOTS_IRON) && !LINK_IS_DEITY) {
+        // FD (2026-07-11): Fierce Deity is exempt from the heavy iron-boots gait (RE z_player.c:2564).
         return GET_PLAYER_ANIM(PLAYER_ANIMGROUP_heavy_run, this->modelAnimType);
     } else {
         return GET_PLAYER_ANIM(PLAYER_ANIMGROUP_run, this->modelAnimType);
@@ -2300,8 +2363,6 @@ void Player_InitHookshotIA(PlayState* play, Player* this) {
     this->heldActor =
         Actor_SpawnAsChild(&play->actorCtx, &this->actor, play, ACTOR_ARMS_HOOK, this->actor.world.pos.x,
                            this->actor.world.pos.y, this->actor.world.pos.z, 0, this->actor.shape.rot.y, 0, 0);
-
-    GameInteractor_Should(VB_INIT_HOOKSHOT_IA, true, this);
 }
 
 void Player_InitBoomerangIA(PlayState* play, Player* this) {
@@ -2536,6 +2597,20 @@ void Player_ProcessItemButtons(Player* this, PlayState* play) {
 
         item = Player_GetItemOnButton(play, i);
 
+        // FD (2026-07-12) #7: play the denied tone at the PRESS level for ANY item the deity form can't use. The
+        // restriction in Player_UseItem covers most items, but aiming items (bow/hookshot/slingshot) route through a
+        // separate first-person path and NEVER reach Player_UseItem, so their denial was otherwise silent.
+        // Parameter_CanUseItem is the full deity allowlist (FD sword/bottles/trade/
+        // scales, + ocarina under its cheat); it returns 1 for ITEM_MASK_DEITY so the transform still runs (its own
+        // out-of-zone denial lives in Player_UseItem). Fishing pond / bombchu bowling are excluded so their
+        // force-equipped rod/bombchu aren't denied. `i` here is the just-pressed button (edge), so this fires once.
+        if (LINK_IS_DEITY && (item != ITEM_NONE) && (item != ITEM_NONE_FE) && (item != ITEM_LAST_USED) &&
+            (play->sceneNum != SCENE_FISHING_POND) && (play->sceneNum != SCENE_BOMBCHU_BOWLING_ALLEY) &&
+            !Parameter_CanUseItem(item)) {
+            Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
+            return;
+        }
+
         if (item >= ITEM_NONE_FE) {
             for (i = 0; i < ARRAY_COUNT(sItemButtons); i++) {
                 if (CHECK_BTN_ALL(sControlInput->cur.button, sItemButtons[i])) {
@@ -2612,7 +2687,7 @@ void Player_UpdateItems(Player* this, PlayState* play) {
          !(this->stateFlags1 & PLAYER_STATE1_START_CHANGING_HELD_ITEM)) &&
         ((this->heldItemAction == this->itemAction) || (this->stateFlags1 & PLAYER_STATE1_SHIELDING)) &&
         (gSaveContext.health != 0) && (play->csCtx.state == CS_STATE_IDLE) && (this->csAction == 0) &&
-        (play->shootingGalleryStatus == 0) && (play->activeCamera == CAM_ID_MAIN) &&
+        (play->shootingGalleryStatus == 0) && (play->activeCamera == MAIN_CAM) &&
         (play->transitionTrigger != TRANS_TRIGGER_START) && (gSaveContext.timerState != TIMER_STATE_STOP)) {
         Player_ProcessItemButtons(this, play);
     }
@@ -2742,8 +2817,11 @@ s32 func_80834758(PlayState* play, Player* this) {
 
     if (!(this->stateFlags1 & (PLAYER_STATE1_SHIELDING | PLAYER_STATE1_ON_HORSE | PLAYER_STATE1_IN_CUTSCENE)) &&
         (play->shootingGalleryStatus == 0) && (this->heldItemAction == this->itemAction) &&
-        (this->currentShield != PLAYER_SHIELD_NONE) && !Player_IsChildWithHylianShield(this) &&
-        Player_IsZTargeting(this) && CHECK_BTN_ALL(sControlInput->cur.button, BTN_R)) {
+        // FD (2026-07-11): Fierce Deity holds its brace stance without a shield, and can enter it via
+        // Z-target even with no shield equipped (RE z_player.c:3071, was `!LINK_IS_HUMAN`).
+        (this->currentShield != PLAYER_SHIELD_NONE || LINK_IS_DEITY) && !Player_IsChildWithHylianShield(this) &&
+        (Player_IsZTargeting(this) || (this->actor.category == ACTORCAT_PLAYER && LINK_IS_DEITY)) &&
+        CHECK_BTN_ALL(sControlInput->cur.button, BTN_R)) {
 
         anim = func_808346C4(play, this);
         frame = Animation_GetLastFrame(anim);
@@ -2904,7 +2982,7 @@ s32 func_80834D2C(Player* this, PlayState* play) {
 
     if (this->stateFlags1 & PLAYER_STATE1_ON_HORSE) {
         Player_AnimPlayLoop(play, this, &gPlayerAnim_link_uma_anim_walk);
-    } else if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && !Player_UpdateHostileLockOn(this)) {
+    } else if ((this->actor.bgCheckFlags & 1) && !Player_UpdateHostileLockOn(this)) {
         Player_AnimPlayLoop(play, this, GET_PLAYER_ANIM(PLAYER_ANIMGROUP_wait, this->modelAnimType));
     }
 
@@ -3055,7 +3133,7 @@ s32 func_808351D4(Player* this, PlayState* play) {
                 if (!func_808350A4(play, this)) {
                     Player_PlaySfx(this, D_808543DC[ABS(this->unk_860) - 1]);
                 }
-            } else if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+            } else if (this->actor.bgCheckFlags & 1) {
                 func_808350A4(play, this);
             }
         }
@@ -3113,7 +3191,7 @@ s32 func_808353D8(Player* this, PlayState* play) {
 }
 
 s32 func_80835588(Player* this, PlayState* play) {
-    if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) || LinkAnimation_Update(play, &this->upperSkelAnime)) {
+    if (!(this->actor.bgCheckFlags & 1) || LinkAnimation_Update(play, &this->upperSkelAnime)) {
         Player_SetUpperActionFunc(this, func_8083501C);
     }
 
@@ -3123,7 +3201,7 @@ s32 func_80835588(Player* this, PlayState* play) {
 void Player_SetParallel(Player* this) {
     this->stateFlags1 |= PLAYER_STATE1_PARALLEL;
 
-    if (!(this->skelAnime.movementFlags & 0x80) && (this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) &&
+    if (!(this->skelAnime.movementFlags & 0x80) && (this->actor.bgCheckFlags & 0x200) &&
         (sShapeYawToTouchedWall < 0x2000)) {
         // snap to the wall
         this->yaw = this->actor.shape.rot.y = this->actor.wallYaw + 0x8000;
@@ -3304,7 +3382,7 @@ s32 Player_SetupAction(PlayState* play, Player* this, PlayerActionFunc actionFun
     }
 
     if (Player_Action_8084E3C4 == this->actionFunc) {
-        AudioOcarina_SetInstrument(OCARINA_INSTRUMENT_OFF);
+        Audio_OcaSetInstrument(0);
         this->stateFlags2 &= ~(PLAYER_STATE2_ATTEMPT_PLAY_FOR_ACTOR | PLAYER_STATE2_PLAY_FOR_ACTOR);
     } else if (Player_Action_808507F4 == this->actionFunc) {
         func_80832340(play, this);
@@ -3379,19 +3457,19 @@ void Player_SetupActionPreserveItemAction(PlayState* play, Player* this, PlayerA
     }
 }
 
-void Player_RequestCameraSetting(PlayState* play, s16 camSetting) {
-    if (!Play_CamIsNotFixed(play)) {
+void func_80835E44(PlayState* play, s16 camSetting) {
+    if (!func_800C0CB8(play)) {
         if (camSetting == CAM_SET_SCENE_TRANSITION) {
-            Interface_ChangeHudVisibilityMode(HUD_VISIBILITY_NOTHING_ALT);
+            Interface_ChangeAlpha(2);
         }
     } else {
-        Camera_RequestSetting(Play_GetCamera(play, CAM_ID_MAIN), camSetting);
+        Camera_ChangeSetting(Play_GetCamera(play, 0), camSetting);
     }
 }
 
-void Player_SetTurnAroundCamera(PlayState* play, s32 camItemType) {
-    Player_RequestCameraSetting(play, CAM_SET_TURN_AROUND);
-    Camera_SetCameraData(Play_GetCamera(play, CAM_ID_MAIN), CAM_DATA_SET_2, NULL, NULL, camItemType, 0, 0);
+void func_80835EA4(PlayState* play, s32 arg1) {
+    func_80835E44(play, CAM_SET_TURN_AROUND);
+    Camera_SetCameraData(Play_GetCamera(play, 0), 4, NULL, NULL, arg1, 0, 0);
 }
 
 void Player_DestroyHookshot(Player* this) {
@@ -3406,6 +3484,864 @@ void Player_DestroyHookshot(Player* this) {
     }
 }
 
+// ==========================================================================================================
+// FD (2026-07-11) Task 1: ANIMATED Fierce Deity mask-transform cutscene.
+// Ported from the RE (fd_build z_player.c): Player_SetupMaskTransformation (~2783), Player_MaskTransformation
+// (action fn, ~2690), Player_StartMaskCutscene / Player_EndMaskCutscene (~2299/2307),
+// Player_UpdateTransformationAnim (~2538), data sMaskAnims / sFormCutsceneIDs / sTransformScreamSfx.
+//
+// SoH func-name mapping (RE func_ -> SoH descriptive):
+//   func_80835C58 -> Player_SetupAction             (action-fn setup)
+//   func_80832B78 -> Player_AnimChangeOnceMorphAdjusted (cl_setmask @2/3 speed, -6 morph)
+//   func_808322A4 -> Player_AnimPlayLoopAdjusted     (cl_setmaskend loop @2/3)
+//   func_80832924 -> Player_ProcessAnimSfxList       (AnimSfxEntry / ANIMSFX_* encoding)
+//   func_80832564 -> func_80832564                   (same name in SoH)
+//   func_80839FFC -> func_80839FFC                   (same; returns to normal locomotion)
+//   CAM_ID_MAIN/CAM_ID_NONE -> MAIN_CAM/SUBCAM_NONE
+//
+// HANDOFF (no double-commit): the ported action fn plays the animation/camera/scream IN FRONT of the EXISTING
+// SoH white-fade + Player_Draw apex commit. At the cutscene apex it sets play->ageChangeFlag ONCE; the z_play.c
+// fade driver ramps ageChangeFadeAlpha and Player_Draw does the age/skeleton swap + FD-sword-on-B stash/restore
+// (gSaveContext.ship.*). This action fn does NOT call Player_ChangeAge or touch the stash itself.
+
+// cl_setmask (put-on) shared by human forms; take-off anim when reverting from a form. Indexed by CURRENT
+// linkAge. NOTE: SoH stores these as OTR resource-path char[] (object_link_deity.h); the SkelAnime/LinkAnimation
+// API resolves them via ResourceMgr_LoadAnimByName, and skelAnime.animation keeps the unresolved path pointer
+// (so identity compares below use the raw symbol).
+static LinkAnimationHeader* sMaskAnims[LINK_AGE_MAX] = {
+    (LinkAnimationHeader*)gPlayerAnim_cl_setmask,       // LINK_AGE_ADULT: don FD mask
+    (LinkAnimationHeader*)gPlayerAnim_cl_setmask,       // LINK_AGE_CHILD: don FD mask
+    (LinkAnimationHeader*)gPlayerAnim_pz_maskoffstart,  // LINK_AGE_DEITY: take FD mask off (revert)
+};
+
+// FD: MM's ONEPOINTDEMO_TRANSFORM_MASK_HUMAN/FORM (1040/1041) and their CAM_SET_MASK_TRANSFORMATION0/1 camera
+// functions (fd_build z_camera.c Camera_Transform0/1) do NOT exist in SoH, and this task may not edit
+// z_onepointdemo.c / z_camera.c. csId 1020 is used here ONLY to allocate + activate the subcamera (and park the
+// main cam); Player_StartMaskCutscene then re-homes it to CAM_SET_FREE0 and Player_DriveTransformSubCam frames
+// Link's face by hand every frame (see the "Task 1 (CAMERA)" note above Player_DriveTransformSubCam). So the
+// framing here is real, not the no-op 1020 push the placeholder produced.
+static s16 sFormCutsceneIDs[LINK_AGE_MAX] = { 1020, 1020, 1020 };
+
+// FD (2026-07-11): FALLBACK for the MM put-on scream (0x8E0 adult / 0x8E1 child). The faithful MM samples now
+// play via the custom-audio route (custom/music/FD_TransformAdult|Child, see Player_PlayFdTransformSfx); this
+// nearest-Link-voice table is only used if the custom sequence failed to register. docs/FD_MM_SFX_PLAN.md.
+static u16 sTransformScreamSfx[LINK_AGE_MAX] = {
+    NA_SE_VO_LI_MAGIC_ATTACK,     // adult
+    NA_SE_VO_LI_MAGIC_ATTACK_KID, // child
+    NA_SE_VO_LI_MAGIC_ATTACK,     // deity
+};
+
+// FD (2026-07-11): FALLBACK for MM NA_SE_PL_FACE_CHANGE (0x8E2). The faithful Mask_Untransform sample now plays
+// via custom/music/FD_TransformFaceChange (see Player_PlayFdTransformSfx); this substitute is used only if that
+// custom sequence failed to register. docs/FD_MM_SFX_PLAN.md.
+#define FD_SFX_FACE_CHANGE NA_SE_PL_CHANGE_ARMS
+
+// RE D_8085D8F0 / D_8085D904, translated to SoH's AnimSfxEntry / ANIMSFX_* encoding. NA_SE_IT_TRANSFORM_MASK_BROKEN
+// (MM 0x1850) is absent -> nearest existing sfx substitute (the @-20 entry). Real sample Mask_Attach.aifc
+// (font-0 instr 95); faithful swap recipe: docs/FD_MM_SFX_PLAN.md. // FD (2026-07-11)
+static AnimSfxEntry sMaskTransformAnimSfx[] = {
+    { NA_SE_PL_PUT_OUT_ITEM, ANIMSFX_DATA(ANIMSFX_TYPE_GENERAL, 2) },
+    // FD (2026-07-11) bug 6 (transform sounds): the mask PUT-ON "shhk" (RE NA_SE_IT_SET_TRANSFORM_MASK == the real
+    // Mask_Attach sample, RE D_8085D8F0 @frame 4) and the mask-broken accent (RE @frame -20) are now fired as
+    // FAITHFUL custom one-shots (FD_TransformMaskAttach) at frames 4 and 20 in Player_UpdateTransformationAnim -- so
+    // the OoT NA_SE_PL_CHANGE_ARMS substitute is removed from this table. NA_SE_PL_PUT_OUT_ITEM @2 (the generic
+    // item-draw beat, RE-uncommented) and NA_SE_PL_FREEZE_S @11 (the freeze pose, list terminator) stay.
+    { NA_SE_PL_FREEZE_S, -ANIMSFX_DATA(ANIMSFX_TYPE_GENERAL, 11) },
+};
+// FD (2026-07-11) bug 6 (transform sounds): the mask TAKE-OFF Mask_Attach (RE D_8085D904 NA_SE_IT_SET_TRANSFORM_MASK
+// @frame -8) is now fired as a custom one-shot (FD_TransformMaskAttach) at frame 8 in the take-off branch of
+// Player_UpdateTransformationAnim, so the old single-entry sMaskOffAnimSfx substitute table is gone (its only entry
+// was that substitute).
+
+// File-static transform state (RE: transformFillScreenFlag / preTransformYaw). sFdMaskHandedOff latches the
+// single hand-off to the SoH white-fade apex commit so ageChangeFlag is not re-armed every frame.
+static u8 transformFillScreenFlag = 0;
+static s16 preTransformYaw = 0;
+static u8 sFdMaskHandedOff = false;
+// FD (2026-07-12) parity Gap 1: the post-apex SETTLE phase (MM Player_Action_87). After the white fade fully
+// clears, MM plays a tail animation -- cl_maskoff (pull the FD mask off, on revert to human) or cl_setmaskend
+// (a form) -- with the mask still drawn, THEN settles to idle. 0 = not settling, 1 = tail playing.
+static u8 sFdSettling = 0;
+
+// ==========================================================================================================
+// FD (2026-07-11) Task 1: mask-transform LIGHTS -- the colored point-light glow + env-light interpolation that
+// produce the "blue swirl" glow during the transform cutscene. Ported from the RE (fd_build z_player.c):
+//   RE TransformLights* structs (~2338-2353), func_80854CD0 (~2370), func_80854EFC (~2398),
+//   sTransformLightInfo[] (~2456), Player_UpdateTransformLights (~2486), and the savedLightSettings
+//   env-save/restore in Player_SetupMaskTransformation (~2810) / Player_SetupEndMaskTransformation (~2669).
+//
+// SoH type mapping (verified against soh/include/z64environment.h + z64light.h):
+//   MM AdjLightSettings (has an EXTRA adjLight2Color) -> SoH has NO adjLight2Color. SoH's adjusted-light fields
+//   envCtx.adjAmbientColor / adjLight1Color / adjFogColor / adjFogNear / adjFogFar are CONTIGUOUS s16 at
+//   0x8C..0xA2, so a SoH-matched AdjLightSettings (below, size 0x16) maps exactly onto that region when cast
+//   from &envCtx.adjAmbientColor. func_80854EFC never touches light2Color, so dropping it is faithful.
+//   Base scene lighting is read from envCtx.lightSettings (EnvLightSettings: ambientColor/light1Color/fogColor
+//   u8[3], fogNear s16). RE's TRUNCF_BINANG (== (s16)(f32)) -> plain (s16) cast (macro absent in SoH).
+typedef struct {
+    /* 0x00 */ s16 ambientColor[3];
+    /* 0x06 */ s16 light1Color[3];
+    /* 0x0C */ s16 fogColor[3];
+    /* 0x12 */ s16 fogNear;
+    /* 0x14 */ s16 fogFar;
+} AdjLightSettings; // SoH-layout, overlays envCtx.adjAmbientColor..adjFogFar; size = 0x16
+
+// RE savedLightSettings (~2529): the world's adjusted lighting captured at transform start and restored at end
+// so the env-light interpolation below does NOT leak into normal scene lighting.
+static AdjLightSettings savedLightSettings;
+
+// RE D_8085D910 (~2608): [startFrame, rate, midFrame, endFrame] pacing for the transformMatrixModifiers[4]
+// env-color ramp. Only entry [0] is referenced by the transform action fn (RE sp4C = D_8085D910, never bumped).
+typedef struct {
+    u8 startFrame;
+    u8 rate;
+    u8 midFrame;
+    u8 endFrame;
+} MaskTransformLightStep;
+static MaskTransformLightStep sMaskTransformLightSteps[] = {
+    { 0x10, 0xA, 0x3B, 0x3F },
+    { 9, 0x32, 0xA, 0xD },
+};
+
+// RE TransformLights_unk_00 (~2338): env fog/ambient key for one interpolation stage.
+typedef struct {
+    /* 0x0 */ s16 fogNear;
+    /* 0x2 */ u8 fogColor[3];
+    /* 0x5 */ u8 ambientColor[3];
+} TransformLightEnvKey; // size = 0x8
+
+// RE TransformLights_unk_18 (~2344): a point-light key (position relative to player yaw, color, radius).
+typedef struct {
+    /* 0x00 */ Vec3f pos;
+    /* 0x0C */ u8 color[3];
+    /* 0x10 */ s16 radius;
+} TransformLightPointKey; // size = 0x14
+
+// RE TransformLights (~2350): 3 env keys + 3 point-light keys, one set per form-class (human / non-human).
+typedef struct {
+    /* 0x00 */ TransformLightEnvKey env[3];
+    /* 0x18 */ TransformLightPointKey light[3];
+} TransformLightInfo; // size = 0x54
+
+// RE Player_TranslateAndRotateY (~2360) / Lib_Vec3f_TranslateAndRotateY (z_lib.c ~646, absent in SoH): rotate
+// `src` about Y by the player's shape yaw and add `translation`, storing into `dst`.
+static void Player_TranslateAndRotateY(Player* this, Vec3f* translation, Vec3f* src, Vec3f* dst) {
+    f32 cos = Math_CosS(this->actor.shape.rot.y);
+    f32 sin = Math_SinS(this->actor.shape.rot.y);
+    dst->x = translation->x + (src->x * cos + src->z * sin);
+    dst->y = translation->y + src->y;
+    dst->z = translation->z + (src->z * cos - src->x * sin);
+}
+
+// RE func_80854CD0 (~2370): three parallel 3-component color lerps. For each of out{A,B,C}[i]:
+//   out = (s32)((first - second) * t) + second - bias
+static void Player_InterpolateTransformColors(f32 t, s16* outA, u8* firstA, u8* secondA, u8* biasA, s16* outB,
+                                              u8* firstB, u8* secondB, u8* biasB, s16* outC, u8* firstC,
+                                              u8* secondC, u8* biasC) {
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        outA[i] = ((s32)((firstA[i] - secondA[i]) * t) + secondA[i]) - biasA[i];
+        outB[i] = ((s32)((firstB[i] - secondB[i]) * t) + secondB[i]) - biasB[i];
+        outC[i] = ((s32)((firstC[i] - secondC[i]) * t) + secondC[i]) - biasC[i];
+    }
+}
+
+// RE func_80854EFC (~2398): drive the ADJUSTED env light (fog/ambient/light1) through 4 stages as `t` runs
+// 0->4, interpolating between the scene's current light1/fog/ambient and the 3 keyed env stages. The adjusted
+// values are stored as a DELTA over the base lightSettings (SoH adds adj* to the base each frame), matching the
+// RE which subtracts play->envCtx.lightSettings.* from each result.
+static void Player_UpdateTransformEnvLights(PlayState* play, f32 t, TransformLightEnvKey* keys) {
+    static u8 sTransformBlack[3] = { 0, 0, 0 }; // RE D_8085D844
+    AdjLightSettings* adj = (AdjLightSettings*)play->envCtx.adjAmbientColor;
+    TransformLightEnvKey base;
+    TransformLightEnvKey* to;
+    TransformLightEnvKey* from;
+    u8* colorTo;   // light1Color source for the `to` stage
+    u8* colorFrom; // light1Color source for the `from` stage
+    u8* sceneLight1 = play->envCtx.lightSettings.light1Color;
+
+    base.fogNear = play->envCtx.lightSettings.fogNear;
+    base.fogColor[0] = play->envCtx.lightSettings.fogColor[0];
+    base.fogColor[1] = play->envCtx.lightSettings.fogColor[1];
+    base.fogColor[2] = play->envCtx.lightSettings.fogColor[2];
+    base.ambientColor[0] = play->envCtx.lightSettings.ambientColor[0];
+    base.ambientColor[1] = play->envCtx.lightSettings.ambientColor[1];
+    base.ambientColor[2] = play->envCtx.lightSettings.ambientColor[2];
+
+    if (t <= 1.0f) {
+        t -= 0.0f;
+        to = &keys[0];
+        from = &base;
+        colorTo = sTransformBlack;
+        colorFrom = sceneLight1;
+    } else if (t <= 2.0f) {
+        t -= 1.0f;
+        to = &keys[1];
+        from = &keys[0];
+        colorTo = sTransformBlack;
+        colorFrom = sTransformBlack;
+    } else if (t <= 3.0f) {
+        t -= 2.0f;
+        to = &keys[2];
+        from = &keys[1];
+        colorTo = sTransformBlack;
+        colorFrom = sTransformBlack;
+    } else {
+        t -= 3.0f;
+        to = &base;
+        from = &keys[2];
+        colorTo = sceneLight1;
+        colorFrom = sTransformBlack;
+    }
+
+    adj->fogNear = ((s16)((to->fogNear - from->fogNear) * t) + from->fogNear) - play->envCtx.lightSettings.fogNear;
+
+    Player_InterpolateTransformColors(t, adj->fogColor, to->fogColor, from->fogColor,
+                                      play->envCtx.lightSettings.fogColor, adj->ambientColor, to->ambientColor,
+                                      from->ambientColor, play->envCtx.lightSettings.ambientColor, adj->light1Color,
+                                      colorTo, colorFrom, sceneLight1);
+}
+
+// RE sTransformLightInfo[] (~2456): verbatim colors/positions/radii. Index 0 = human (arg4 0), index 1 = form.
+static TransformLightInfo sTransformLightInfo[] = {
+    {
+        {
+            { 650, { 0, 0, 0 }, { 10, 0, 30 } },
+            { 300, { 200, 200, 255 }, { 0, 0, 0 } },
+            { 600, { 0, 0, 0 }, { 0, 0, 200 } },
+        },
+        {
+            { { -40.0f, 20.0f, -10.0f }, { 120, 200, 255 }, 1000 },
+            { { 0.0f, -10.0f, 0.0f }, { 255, 255, 255 }, 5000 },
+            { { -10.0f, 4.0f, 3.0f }, { 200, 200, 255 }, 5000 },
+        },
+    },
+    {
+        {
+            { 650, { 0, 0, 0 }, { 10, 0, 30 } },
+            { 300, { 200, 200, 255 }, { 0, 0, 0 } },
+            { 600, { 0, 0, 0 }, { 0, 0, 200 } },
+        },
+        {
+            { { 0.0f, 0.0f, 5.0f }, { 155, 255, 255 }, 100 },
+            { { 0.0f, 0.0f, 5.0f }, { 155, 255, 255 }, 100 },
+            { { 0.0f, 0.0f, 5.0f }, { 155, 255, 255 }, 100 },
+        },
+    },
+};
+
+// RE Player_UpdateTransformLights (~2486): `colorParam` (transformMatrixModifiers[4]) drives the env-light
+// interpolation; `radiusParam` (transformMatrixModifiers[5]) both selects one of the 3 point-light keys and
+// scales its radius; `set` (0 = human, 1 = non-human) picks the key set. Positions the persistent lightInfo.
+void Player_UpdateTransformLights(PlayState* play, Player* this, f32 colorParam, f32 radiusParam, s32 set) {
+    TransformLightInfo* info = &sTransformLightInfo[set];
+    TransformLightPointKey* lightKey = info->light;
+    Vec3f pos;
+
+    Player_UpdateTransformEnvLights(play, colorParam, info->env);
+
+    if (radiusParam > 2.0f) {
+        radiusParam -= 2.0f;
+        lightKey += 2;
+    } else if (radiusParam > 1.0f) {
+        radiusParam -= 1.0f;
+        lightKey++;
+    }
+
+    Player_TranslateAndRotateY(this, &this->actor.world.pos, &lightKey->pos, &pos);
+    Lights_PointNoGlowSetInfo(&this->lightInfo, pos.x, pos.y, pos.z, lightKey->color[0], lightKey->color[1],
+                              lightKey->color[2], lightKey->radius * radiusParam);
+}
+// ==========================================================================================================
+// FD (2026-07-11) Task 1 (CAMERA): the transform close-up.
+//
+// The RE frames the transform with a DEDICATED one-point demo -- ONEPOINTDEMO_TRANSFORM_MASK_HUMAN (1040) for
+// donning a mask and ONEPOINTDEMO_TRANSFORM_MASK_FORM (1041) for reverting (fd_build z_player.c:2592-2599,
+// sFormCutsceneIDs) -- routed in fd_build z_onepointdemo.c:1197-1206 to the MM camera SETTINGS
+// CAM_SET_MASK_TRANSFORMATION0 / CAM_SET_MASK_TRANSFORMATION1. Those settings run the camera functions
+// Camera_Transform0 (fd_build z_camera.c:6518) and Camera_Transform1 (:6679): the camera pushes onto Link's
+// face, rolls left/right during the mask-don/scream, zooms into the "bulging-eyes" face, then backs off as the
+// new form appears (Transform1 does the mirror: still, roll-and-zoom-out, settle).
+//
+// SoH has NONE of that machinery -- not the 1040/1041 one-point demo ids (z_onepointdemo.c), not the
+// CAM_SET_MASK_TRANSFORMATION0/1 settings, and not Camera_Transform0/1 -- and this task may only edit
+// z_player.c / z_player_lib.c (not z_camera.c / z_onepointdemo.c). So the camera is driven MANUALLY from the
+// player action here (which is what the placeholder csId 1020 failed to do -- 1020's only keyframe target is
+// the CURRENT main-camera pose, i.e. a visible no-op, exactly the "missing camera changes" the user reported):
+//   1. OnePointCutscene_Init still allocates/activates the subcamera (and parks the main cam), as before.
+//   2. Player_StartMaskCutscene immediately re-homes that subcamera onto CAM_SET_FREE0, whose camera function
+//      Camera_Unique6 (z_camera.c:5074) is a pure HOLD -- it never writes camera->eye/at -- so our per-frame
+//      writes are not clobbered.
+//   3. Player_DriveTransformSubCam writes the subcam eye/at/fov/roll every frame, framing Link's face the way
+//      Camera_Transform0/1 do. The player action runs in Actor_UpdateAll (z_play.c:1219) BEFORE Camera_Update
+//      (:1323), so the writes survive the frame's camera pass and reach the View.
+//   4. Player_EndMaskCutscene copies the final subcam pose back to the main camera and ends the one-point
+//      (unchanged), so control + framing restore cleanly.
+
+// FD (2026-07-11) Task 1 (CAMERA) bug 1 REWRITE: per-cutscene random roll direction only (Camera_Transform0
+// rwData->unk_10 sign, fd_build z_camera.c:6558 / Camera_Transform1 :6716). r/fov/pitch are now computed
+// DIRECTLY from the cutscene frame each pass (see Player_DriveTransformSubCam) rather than eased from the
+// gameplay camera distance -- the old Math_StepToF-from-subCam->dist seeding could never traverse the ~hundreds
+// of units to 30-40 within the short cutscene, so the put-on only ever crept inward and the REVERT (which must
+// start close and pull OUT) instead crept inward too, i.e. it played BACKWARDS (the reported bug).
+static f32 sTransformCamRollSign = 1.0f;
+
+// deg (f32) -> binang; matches MM's CAM_DEG_TO_BINANG(deg)/Math_SinF(DEG_TO_RAD(deg)) pairing (0x10000/360).
+#define FD_XFORM_DEG_TO_BINANG(deg) ((s16)((deg) * 182.04444f))
+
+// FD (2026-07-11) Task 1 (CAMERA): per-frame manual framing of the transform subcamera, FAITHFUL to the two MM
+// camera functions (fd_build z_camera.c, authoritative):
+//   Camera_Transform0 (PUT-ON, human->form, :6518): state1 (frames 0-38) fixed on the face, atToEye.r eases
+//     40->30, pitch 0, fov 80, rolling L/R; state2 (24f) steadies r=35 pitch=0x2000 fov 80->32; state3 (35f)
+//     zooms the bulging-eyes face r=35 pitch=0x2000 fov 32->60. Net: PUSH IN to the face, fov telephoto.
+//   Camera_Transform1 (REVERT, form->human, :6679): state1 (frames 0-18) STILL and CLOSE r=30 pitch=0 fov=80;
+//     state2 (46f) zooms OUT r 30->80 while rolling, fov 80. Net: start close, PULL BACK (the mirror of put-on).
+// Keyed on LINK_IS_HUMAN (the CURRENT form: human = donning = Transform0; deity = reverting = Transform1). The
+// values are set directly (MM sets r/pitch/fov per-frame too), so the correct start pose and direction are
+// guaranteed for BOTH put-on and revert -- no crawl from the gameplay distance.
+static void Player_DriveTransformSubCam(PlayState* play, Player* this) {
+    Camera* subCam;
+    Vec3f at;
+    Vec3f eye;
+    f32 r;
+    f32 fov;
+    f32 rollDeg = 0.0f;
+    f32 horiz;
+    f32 p;
+    s16 pitch;
+    s16 yaw;
+    s16 roll;
+    s32 t = this->transformEventTimer1;
+    f32 headOffset = LINK_IS_CHILD ? 40.0f : 60.0f; // approx face height above the feet
+
+    if (this->subCamId == SUBCAM_NONE) {
+        return;
+    }
+    subCam = play->cameraPtrs[this->subCamId];
+    if (subCam == NULL) {
+        return;
+    }
+
+    // FD (2026-07-12) parity Gap 3: `osc` is the RE's shared roll oscillation (unk_0C); `swayMag` drives the
+    // at-point side-to-side sway synced with it (RE Camera_Transform0 :6575-6578 / Transform1 :6741-6743);
+    // `behind` is the state-2 "-7 units behind the facing" at-offset (RE :6601-6607).
+    f32 osc = 0.0f;
+    f32 swayMag = 0.0f;
+    f32 behind = 0.0f;
+
+    if (LINK_IS_HUMAN) {
+        // Camera_Transform0 (put-on): fd_build z_camera.c:6549-6664.
+        if (t < 38) { // state1: fixed on the face, r 40->30, pitch level, fov 80, rolls L/R (from frame 12)
+            p = t / 38.0f;
+            r = 40.0f - (10.0f * p);
+            pitch = 0;
+            fov = 80.0f;
+            if (t >= 12) { // z_camera.c:6563-6583: amplitude (timer*30/19)deg * random-sign sin sweep
+                osc = sTransformCamRollSign * Math_SinS(FD_XFORM_DEG_TO_BINANG((t - 12) * (135.0f / 13.0f)));
+                rollDeg = (t * (30.0f / 19.0f)) * osc;
+            }
+            swayMag = t * (6.0f / 19.0f); // z_camera.c:6575 at-point sway amplitude
+        } else if (t < 62) { // state2: steady close-up, r 35, pitch 0x2000, fov 80->32 (z_camera.c:6598-6627)
+            p = (t - 38) / 24.0f;
+            r = 35.0f;
+            pitch = 0x2000;
+            fov = 80.0f + ((32.0f - 80.0f) * p);
+            behind = -7.0f; // z_camera.c:6601-6607: at-point sits 7 units behind the facing
+        } else { // state3: zoom into the bulging-eyes face, r 35, pitch 0x2000, fov 32->60 (z_camera.c:6629-6648)
+            p = (t - 62) / 35.0f;
+            if (p > 1.0f) {
+                p = 1.0f;
+            }
+            r = 35.0f;
+            pitch = 0x2000;
+            fov = 32.0f + ((60.0f - 32.0f) * (p * p));
+        }
+    } else {
+        // Camera_Transform1 (revert): fd_build z_camera.c:6708-6771. THE MIRROR: start CLOSE, then pull OUT.
+        if (t < 18) { // state1: still and close on the face, r 30, pitch level, fov 80 (z_camera.c:6709-6733)
+            r = 30.0f;
+            pitch = 0;
+            fov = 80.0f;
+        } else { // state2: zoom OUT r 30->80 while rolling, fov 80 (z_camera.c:6735-6756)
+            f32 timer = 46.0f - (t - 18); // MM rwData->timer: 46 -> 0
+            p = (t - 18) / 46.0f;
+            if (p > 1.0f) {
+                p = 1.0f;
+            }
+            if (timer < 0.0f) {
+                timer = 0.0f;
+            }
+            r = 30.0f + (50.0f * p);
+            pitch = 0;
+            fov = 80.0f;
+            { // z_camera.c:6737-6747: amplitude (timer*10/23)deg * random-sign sin sweep (timer*180/23)
+                osc = sTransformCamRollSign * Math_SinS(FD_XFORM_DEG_TO_BINANG(timer * (180.0f / 23.0f)));
+                rollDeg = (timer * (10.0f / 23.0f)) * osc;
+            }
+            swayMag = (46.0f - timer) * (5.0f / 46.0f); // z_camera.c:6741 revert at-point sway amplitude
+        }
+    }
+
+    roll = FD_XFORM_DEG_TO_BINANG(rollDeg);
+
+    // Player was just turned to face the camera (Player_MaskTransformation set shape.rot.y), so put the eye in
+    // FRONT of the face (along the facing yaw), lifted by the pitch -- looking slightly down onto the face.
+    yaw = this->actor.shape.rot.y;
+    horiz = r * Math_CosS(pitch);
+
+    // FD (2026-07-12): frame the true HEAD position (RE at-point = Actor_GetFocus, the head). The old fixed
+    // headOffset (60/40) framed the *revert* wrong -- FD's head sits at ~100u, not 60u -- so his face was too
+    // low. bodyPartsPos[HEAD].y tracks the real head height for BOTH forms. FD (2026-07-12) parity Gap 3: add the
+    // RE at-point side-sway (perpendicular to the facing, yaw+0x4000, synced to the roll osc) + the state-2 behind
+    // offset (along the facing) so the shot has the same drift/life as MM.
+    (void)headOffset;
+    at.x = this->actor.world.pos.x + (Math_SinS(yaw) * behind) + (Math_SinS(yaw + 0x4000) * swayMag * osc);
+    at.y = this->bodyPartsPos[PLAYER_BODYPART_HEAD].y;
+    at.z = this->actor.world.pos.z + (Math_CosS(yaw) * behind) + (Math_CosS(yaw + 0x4000) * swayMag * osc);
+
+    eye.x = at.x + (Math_SinS(yaw) * horiz);
+    eye.y = at.y + (r * Math_SinS(pitch));
+    eye.z = at.z + (Math_CosS(yaw) * horiz);
+
+    subCam->at = at;
+    subCam->eyeNext = eye;
+    subCam->eye = eye;
+    subCam->fov = fov;
+    subCam->roll = roll;
+    subCam->dist = r;
+    // Keep the reported camera direction consistent with the framing so Player_MaskTransformation's
+    // shape.rot.y = Camera_GetCamDirYaw()+0x8000 is a stable fixed point (eye sits opposite the facing yaw).
+    subCam->camDir.y = yaw + 0x8000;
+}
+
+// RE Player_StartMaskCutscene (~2299): open the subcamera for the transform close-up, then (SoH) re-home it to
+// the manual-drive hold camera (see the CAMERA note above).
+s32 Player_StartMaskCutscene(PlayState* play, Player* this, s16 csId) {
+    // FD (2026-07-14): never open the transform close-up subcamera in a PRERENDERED-BACKGROUND room (mesh-header
+    // type 1 -- Market / Castle Town / shop interiors). Those rooms draw a fixed prerender image with a fixed
+    // camera; swinging a real 3D subcamera onto Link's face renders the true geometry BEHIND the prerender (the
+    // reported "reveal"). base.type==1 is the engine's own prerender discriminator (func_800C0CB8 in z_play.c,
+    // z_camera.c:7046). With no subcam created, Player_DriveTransformSubCam early-returns (subCamId stays
+    // SUBCAM_NONE) so the vanilla fixed camera is left untouched, and Player_EndMaskCutscene already no-ops.
+    if ((this->subCamId == SUBCAM_NONE) && (csId > 0) && (GET_ACTIVE_CAM(play)->csId != csId) &&
+        !((play->roomCtx.curRoom.meshHeader != NULL) && (play->roomCtx.curRoom.meshHeader->base.type == 1))) {
+        this->subCamId = OnePointCutscene_Init(play, csId, 125, &this->actor, MAIN_CAM);
+        // FD (2026-07-11) Task 1 (CAMERA): switch the freshly-created subcamera to CAM_SET_FREE0 (Camera_Unique6,
+        // a hold that never writes eye/at) so Player_DriveTransformSubCam can frame Link's face by hand.
+        // Camera_ChangeSetting refuses a priority downgrade while the setting-lock bit (unk_14A & 1, set by the
+        // CS_C change OnePointCutscene just did) is on (z_camera.c:7942-7948), so clear it first. Seed the drive
+        // state from the copied subcam pose so the first driven frame doesn't snap, and pin the timer so the
+        // one-point cannot self-expire mid-cutscene (we end it explicitly in Player_EndMaskCutscene).
+        if (this->subCamId != SUBCAM_NONE) {
+            Camera* subCam = play->cameraPtrs[this->subCamId];
+            if (subCam != NULL) {
+                subCam->unk_14A &= ~1;
+                Camera_ChangeSetting(subCam, CAM_SET_FREE0);
+                subCam->timer = 0x7FFF;
+                // FD (2026-07-11) bug 1: only the per-cutscene random roll direction is seeded now; r/fov/pitch
+                // are computed directly from the cutscene frame in Player_DriveTransformSubCam (MM snaps them at
+                // state 0, so the first driven frame is an intentional cut, not a crawl from the gameplay pose).
+                sTransformCamRollSign = (play->state.frames & 1) ? 1.0f : -1.0f;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+// RE Player_EndMaskCutscene (~2307): copy the subcamera pose back to the main camera and end the one-point.
+s32 Player_EndMaskCutscene(PlayState* play, Player* this, s16 csId) {
+    Camera* subCam;
+    Camera* mainCam;
+    if (this->subCamId != SUBCAM_NONE) {
+        subCam = play->cameraPtrs[this->subCamId];
+        mainCam = Play_GetCamera(play, MAIN_CAM);
+        if ((subCam != NULL) && (mainCam != NULL) && (subCam->csId == csId)) {
+            mainCam->eye = subCam->eye;
+            mainCam->at = subCam->at;
+            mainCam->up = subCam->up;
+            mainCam->eyeNext = subCam->eyeNext;
+            mainCam->dist = subCam->dist;
+            OnePointCutscene_EndCutscene(play, this->subCamId);
+            this->subCamId = SUBCAM_NONE;
+        }
+    }
+    return false;
+}
+
+// FD (2026-07-11): FAITHFUL MM transform SFX via the custom-audio route (replaces the OoT substitutes).
+// The real MM samples (Adult/Child transform scream, mask-off face-change, mask-attach) are baked as custom
+// AudioSample + SoundFont + one-shot Sequence resources under soh/assets/custom/custom/{samples,fonts,music}/.
+// Each streamed one-shot sequence is CRC-bound to its own custom soundfont, so at AudioLoad_Init it is appended
+// at a real (dynamically assigned) seqNumber. We resolve that seqNumber by resource NAME at play time (robust to
+// the dynamic index) and start it on SEQ_PLAYER_FANFARE — a low-priority, non-BGM player — so it mixes OVER, and
+// never evicts, the main BGM (SEQ_PLAYER_BGM_MAIN). If a custom sequence failed to register (e.g. resource/CRC
+// mismatch) its seqNumber stays at the 0xFFFF sentinel from the XML and we fall back to the OoT substitute sfx,
+// so a bad custom resource degrades to the old behaviour instead of going silent. See docs/FD_MM_SFX_PLAN.md.
+typedef enum {
+    FD_TSEQ_ADULT,       // MM 0x8E0 NA_SE_PL_TRANSFORM_VOICE_ADULT
+    FD_TSEQ_CHILD,       // MM 0x8E1 NA_SE_PL_TRANSFORM_VOICE_CHILD
+    FD_TSEQ_FACE_CHANGE, // MM 0x8E2 NA_SE_PL_FACE_CHANGE
+    FD_TSEQ_MASK_ATTACH, // MM 0x1850 NA_SE_IT_TRANSFORM_MASK_BROKEN
+    FD_TSEQ_FLASH,       // FD (2026-07-12): MM 0x484F NA_SE_SY_TRANSFORM_MASK_FLASH (empty slot in OoT sfx.h)
+    FD_TSEQ_MAX
+} FdTransformSeq;
+
+static const char* sFdTransformSeqNames[FD_TSEQ_MAX] = {
+    "custom/music/FD_TransformAdult",
+    "custom/music/FD_TransformChild",
+    "custom/music/FD_TransformFaceChange",
+    "custom/music/FD_TransformMaskAttach",
+    // FD (2026-07-12): the MM flash sample isn't yet extracted into fd.o2r, so this resolves to NULL and
+    // Player_PlayFdTransformSfx falls back to the audible NA_SE_EV_TRIFORCE_FLASH substitute at the flash apex.
+    "custom/music/FD_TransformFlash",
+};
+
+// FD (2026-07-12) ★AUDIO FIX v6 (DEFINITIVE): the custom transform sounds are STREAMED SEQUENCES that LOAD (ducking
+// the BGM) but stay SILENT through the N64 seq/soundfont/mode path -- every player + SEQ_MODE_IGNORE variant failed
+// (verified by playtest). Bypass the entire N64 audio system: FdAudio_PlayOneShot (OTRGlobals.cpp) decodes the
+// source WAV with drwav and MIXES it straight into the audio-thread output buffer. It plays reliably (it's just SDL
+// PCM mixing), cannot duck/evict the BGM, and needs no seq player / custom font / seqReplaced. Only the genuinely-
+// CUSTOM samples route here (Adult/Child scream, FaceChange/untransform); the mask-attach + flash stay on their
+// vanilla OoT SFX substitutes exactly like the RE (NA_SE_PL_CHANGE_ARMS via the anim-sfx list + NA_SE_EV lightning),
+// so there is no double latch-on.
+static const char* sFdTransformWavPaths[FD_TSEQ_MAX] = {
+    "custom/samples/fd/Adult_Transform.wav",  // FD_TSEQ_ADULT       (put-on scream, adult/deity)
+    "custom/samples/fd/Child_Transform.wav",  // FD_TSEQ_CHILD       (put-on scream, child)
+    "custom/samples/fd/Mask_Untransform.wav", // FD_TSEQ_FACE_CHANGE (revert face-change)
+    NULL,                                     // FD_TSEQ_MASK_ATTACH -> vanilla substitute (avoids double latch-on)
+    NULL,                                     // FD_TSEQ_FLASH       -> vanilla substitute (RE uses NA_SE_EV lightning)
+};
+
+static void Player_PlayFdTransformSfx(Player* this, FdTransformSeq idx, u16 substituteSfx) {
+    // FD (2026-07-12) DUPLICATE-LATCH FIX: the mask-attach beats are ALREADY covered by the anim-sfx list
+    // sMaskTransformAnimSfx (NA_SE_PL_PUT_OUT_ITEM @2, NA_SE_PL_FREEZE_S @11). Routing FD_TSEQ_MASK_ATTACH here too
+    // played a SECOND latch (its substitute) on top -> the reported "duplicate latch-on". Suppress it; the scream +
+    // face-change WAVs are the only genuinely-custom cues that need this path.
+    if (idx == FD_TSEQ_MASK_ATTACH) {
+        return;
+    }
+    if (sFdTransformWavPaths[idx] != NULL) {
+        FdAudio_PlayOneShot(sFdTransformWavPaths[idx]);
+    } else {
+        Player_PlaySfx(this, substituteSfx);
+    }
+}
+
+// FD (2026-07-12): now a no-op -- the direct-WAV mixer never touches the BGM, so there is nothing to restore. Kept
+// so its existing call sites (transform completion + get-item completion) compile unchanged.
+static void Player_RestoreFdTransformBgm(void) {
+}
+
+// RE Player_UpdateTransformationAnim (~2538): advance the transform animation, play the scream + item sfx, and
+// drive the on-face mask squash (transformMatrixModifiers[2]/[3]) read by Player_PostLimbDrawGameplay.
+void Player_UpdateTransformationAnim(PlayState* play, Player* this) {
+    // FD (2026-07-12) parity Gap 1: during the post-apex settle, the settle tail (cl_maskoff/cl_setmaskend) is
+    // advanced by the settle code in Player_MaskTransformation -- skip here so the anim isn't double-updated.
+    if (sFdSettling) {
+        return;
+    }
+    if (LinkAnimation_Update(play, &this->skelAnime) &&
+        (this->skelAnime.animation == (void*)gPlayerAnim_cl_setmask)) {
+        // cl_setmask finished -> hold on the mask-on-end loop (RE func_808322A4).
+        Player_AnimPlayLoopAdjusted(play, this, (LinkAnimationHeader*)gPlayerAnim_cl_setmaskend);
+    } else if ((this->skelAnime.animation == (void*)gPlayerAnim_cl_setmask) ||
+               (this->skelAnime.animation == (void*)gPlayerAnim_cl_setmaskend)) {
+        if (this->transformEventTimer1 >= 58) {
+            Math_StepToS(&this->transformEventTimer2, 255, 50);
+        }
+        if (this->transformEventTimer1 >= 64) {
+            Math_StepToF(&this->transformMatrixModifiers[2], 0.0f, 0.015f);
+        } else if (this->transformEventTimer1 >= 0xE) {
+            Math_StepToF(&this->transformMatrixModifiers[2], 0.3f, 0.3f);
+        }
+        if (this->transformEventTimer1 > 65) {
+            Math_StepToF(&this->transformMatrixModifiers[3], 0.0f, 0.02f);
+        } else if (this->transformEventTimer1 >= 0x10) {
+            Math_StepToF(&this->transformMatrixModifiers[3], -0.1f, 0.1f);
+        }
+        if ((transformFillScreenFlag == 0) && (this->skelAnime.animation == (void*)gPlayerAnim_cl_setmask)) {
+            Player_ProcessAnimSfxList(this, sMaskTransformAnimSfx);
+            // FD (2026-07-11) bug 3 (voice not playing): fire the put-on scream with LinkAnimation_OnFrame(30)
+            // instead of `(s32)curFrame == 30`. The mask-attach one-shots at frames 4/20 (which DO play) already
+            // use LinkAnimation_OnFrame; the scream was the only trigger still using the exact-integer curFrame
+            // compare, which -- at the cl_setmask 2/3 playback speed -- can be eaten on the very update that the
+            // animation ends and switches to cl_setmaskend (that update takes the `LinkAnimation_Update() == true`
+            // branch above, so this else-if body never runs at frame 30). LinkAnimation_OnFrame tests whether the
+            // frame was crossed this update, so it reliably lands. (The custom FD_TransformAdult/Child sequences +
+            // the sTransformScreamSfx fallback both resolve; the trigger was simply never reached.)
+            if (LinkAnimation_OnFrame(&this->skelAnime, 30.0f)) {
+                // FD (2026-07-11): faithful MM put-on scream (0x8E0 adult / 0x8E1 child; deity uses the adult voice).
+                Player_PlayFdTransformSfx(this,
+                                          (gSaveContext.linkAge == LINK_AGE_CHILD) ? FD_TSEQ_CHILD : FD_TSEQ_ADULT,
+                                          sTransformScreamSfx[gSaveContext.linkAge]);
+            }
+            // FD (2026-07-13): put-on frame 4 is only the SUBTLE mask-attach click (RE D_8085D8F0 NA_SE_PL_CHANGE_ARMS).
+            // The prominent MM mask sample (0x1850 = our Mask_Attach.wav) is the mask-BREAK at frame 20, NOT here --
+            // firing the full WAV at frame 4 made the transform sound start too early. Keep frame 4 the quiet click.
+            if (LinkAnimation_OnFrame(&this->skelAnime, 4.0f)) {
+                Player_PlaySfx(this, NA_SE_PL_CHANGE_ARMS);
+            }
+            // FD (2026-07-13): the mask-BROKEN accent at RE put-on frame 20 (RE D_8085D8F0 NA_SE_IT_TRANSFORM_MASK_-
+            // BROKEN, MM 0x1850). In this asset set MM 0x1850 was authored into font-0 instrument 95 -- the very
+            // sample we ship as Mask_Attach.wav (its enum is literally TRANSFORM_MASK_BROKEN; the "attach" name is a
+            // misnomer). So the broken accent IS this WAV; play it directly here like the frame-4 attach and the
+            // revert, instead of the suppressed FD_TSEQ_MASK_ATTACH path. ~1.2s after the frame-4 beat, so it reads
+            // as the distinct mask/face-break snap, not a double. Falls back to NA_SE_PL_FREEZE_S if the WAV is gone.
+            if (LinkAnimation_OnFrame(&this->skelAnime, 20.0f)) {
+                if (!FdAudio_PlayOneShot("custom/samples/fd/Mask_Attach.wav")) {
+                    Player_PlaySfx(this, NA_SE_PL_FREEZE_S);
+                }
+            }
+        }
+    } else {
+        if (this->transformEventTimer1 >= 20) {
+            Math_StepToS(&this->transformEventTimer2, 255, 20);
+        }
+        if (transformFillScreenFlag == 0) {
+            // FD (2026-07-13): mask TAKE-OFF "shhk" -- Link grabs the mask off his face, just before the face-change
+            // woosh (transformEventTimer1 == 15 below). Play MM's real Mask_Attach sample; fall back to
+            // NA_SE_PL_PUT_OUT_ITEM if the WAV is gone. Fired at frame 12 (was 8) -- frame 8 landed while his hands
+            // were still rising to his face, so the sound started too early; 12 lands it as the mask actually leaves.
+            if (LinkAnimation_OnFrame(&this->skelAnime, 12.0f)) {
+                if (!FdAudio_PlayOneShot("custom/samples/fd/Mask_Attach.wav")) {
+                    Player_PlaySfx(this, NA_SE_PL_PUT_OUT_ITEM);
+                }
+            }
+            if (this->transformEventTimer1 == 15) {
+                // FD (2026-07-11): faithful MM mask-off / face-change (0x8E2 == the real Mask_Untransform sample).
+                Player_PlayFdTransformSfx(this, FD_TSEQ_FACE_CHANGE, FD_SFX_FACE_CHANGE);
+            }
+        }
+    }
+}
+
+// RE Player_MaskTransformation (~2690, Player_Action_86). Runs the animated cutscene, then at the apex hands off
+// to the EXISTING SoH white-fade + Player_Draw apex commit (see HANDOFF note above) -- no double commit.
+void Player_MaskTransformation(Player* this, PlayState* play) {
+    Player_ZeroSpeedXZ(this);
+    this->actor.velocity.x = this->actor.velocity.z = 0.0f;
+
+    Player_StartMaskCutscene(play, this, sFormCutsceneIDs[gSaveContext.linkAge]);
+    Player_UpdateTransformationAnim(play, this);
+    this->actor.shape.rot.y = Camera_GetCamDirYaw(GET_ACTIVE_CAM(play)) + 0x8000;
+
+    // FD (2026-07-11) Task 1 (CAMERA): drive the transform subcamera onto Link's face every frame (replaces the
+    // no-op placeholder). Runs here -- before the fillScreen early-return and before Camera_Update -- so the
+    // manual eye/at persist through the apex flash; transformEventTimer1 freezes at apex, so the shot holds.
+    Player_DriveTransformSubCam(play, this);
+
+    // FD (2026-07-12) #5: the transform "blue vortex" is a SWIRLING CONICAL MODEL around the face (gTransformEffectDL
+    // + its scrolling cloud texture) -- drawn in the PLAYER_LIMB_HEAD block of Player_PostLimbDrawGameplay
+    // (z_player_lib.c). It is NOT a flat screen fill (an earlier claim that "MM has no swirl model" was wrong).
+
+    if (transformFillScreenFlag != 0) {
+        if (!sFdMaskHandedOff) {
+            // Apex: arm the SoH white fade once. z_play.c ramps ageChangeFadeAlpha; Player_Draw commits the
+            // age/skeleton swap + FD-sword-on-B stash/restore at the fully-white apex, then flips ageChangeFlag
+            // negative so the fade reverses out.
+            play->ageChangeFlag = this->transformTargetForm;
+            play->ageChangeTimer = 0;
+            sFdMaskHandedOff = true;
+        } else if ((play->ageChangeFlag < 0) && (play->ageChangeFadeAlpha == 0)) {
+            // Commit done + fade fully reversed out. FD (2026-07-11) Task 1: restore the world's adjusted lighting
+            // (RE Player_SetupEndMaskTransformation ~2669) so the env-light interpolation does not leak, and zero
+            // the squash params + timers.
+            if (!sFdSettling) {
+                *((AdjLightSettings*)play->envCtx.adjAmbientColor) = savedLightSettings;
+                this->transformMatrixModifiers[0] = this->transformMatrixModifiers[1] =
+                    this->transformMatrixModifiers[2] = this->transformMatrixModifiers[3] =
+                        this->transformMatrixModifiers[4] = this->transformMatrixModifiers[5] = 0.0f;
+                this->transformEventTimer1 = this->transformEventTimer2 = 0;
+            }
+            // FD (2026-07-12) parity Gap 1: on REVERT (target != DEITY), play MM's post-apex settle tail
+            // (Player_Action_87 -> cl_maskoff = Link pulls the FD mask off his face, mask shown in-hand), keeping
+            // PLAYER_STATE3_TRANSFORMATION_MASK so the mask stays drawn, and wait for it before settling. The
+            // transform-to-DEITY path is left on the proven immediate handoff (no tail). ANIMMODE_ONCE; the anim
+            // is advanced only here (Player_UpdateTransformationAnim skips while sFdSettling) -- no double-update.
+            if ((this->transformTargetForm != LINK_AGE_DEITY) && !sFdSettling) {
+                LinkAnimation_Change(play, &this->skelAnime, (LinkAnimationHeader*)gPlayerAnim_cl_maskoff, 1.0f, 0.0f,
+                                     0.0f, ANIMMODE_ONCE, -6.0f);
+                sFdSettling = 1;
+                return;
+            }
+            if (sFdSettling && !LinkAnimation_Update(play, &this->skelAnime)) {
+                return; // pull-off tail still playing
+            }
+            // Transform-to-form (no tail) OR revert pull-off finished: hand off to the idle WAIT anim from a clean
+            // full-body pose (preserves the bug-4 spasm fix -- still ends on WAIT before func_80839FFC) and fully
+            // clear the transform state.
+            LinkAnimation_Change(play, &this->skelAnime,
+                                 GET_PLAYER_ANIM(PLAYER_ANIMGROUP_wait, this->modelAnimType), 1.0f, 0.0f, 0.0f,
+                                 ANIMMODE_LOOP, -6.0f);
+            this->stateFlags1 &= ~(PLAYER_STATE1_IN_ITEM_CS | PLAYER_STATE1_IN_CUTSCENE);
+            this->stateFlags3 &= ~PLAYER_STATE3_TRANSFORMATION_MASK;
+            Player_EndMaskCutscene(play, this, sFormCutsceneIDs[this->transformPreviousForm]);
+            // FD (2026-07-12) ★AUDIO FIX v4: the transform sounds hijacked SEQ_PLAYER_BGM_MAIN (the only player a
+            // custom streamed seq is audible on). Now that the cutscene is over, restore the pre-transform scene BGM.
+            Player_RestoreFdTransformBgm();
+            transformFillScreenFlag = 0;
+            sFdMaskHandedOff = false;
+            sFdSettling = 0;
+            func_80839FFC(this, play);
+        }
+        return;
+    } else if ((this->transformEventTimer1++ > (LINK_IS_HUMAN ? 0x53 : 0x37)) ||
+               ((this->transformEventTimer1 >= 5) &&
+                CHECK_BTN_ANY(play->state.input[0].press.button,
+                              BTN_CRIGHT | BTN_CLEFT | BTN_CDOWN | BTN_CUP | BTN_B | BTN_A))) {
+        // Reached the apex naturally, or the player skipped it: kick off the fill-screen flash next frame.
+        transformFillScreenFlag = 1;
+        // FD (2026-07-12) bug 3: the white-flash sound (MM NA_SE_SY_TRANSFORM_MASK_FLASH @ MM z_player.c:18062;
+        // the RE commented it out and MM's 0x484F is an empty slot in OoT sfx.h). Fired ONCE here (the fill-screen
+        // branch returns on later frames, so this else-if runs a single time). Uses the real FD_TransformFlash
+        // custom seq if present, else the audible NA_SE_EV_TRIFORCE_FLASH substitute.
+        Player_PlayFdTransformSfx(this, FD_TSEQ_FLASH, NA_SE_EV_TRIFORCE_FLASH);
+        if (LINK_IS_HUMAN) {
+            Audio_StopSfxById(sTransformScreamSfx[gSaveContext.linkAge]);
+        } else {
+            Audio_StopSfxById(FD_SFX_FACE_CHANGE);
+        }
+    }
+    // FD (2026-07-11) Task 1/2: pre-apex only (the fillScreen!=0 branch above returns first, matching RE
+    // Player_MaskTransformation ~2712). Ramp the two light-drive params, then update the point-light glow +
+    // adjusted env lighting (RE ~2756-2780).
+    // transformMatrixModifiers[4] = env-color interpolation param (0 -> 3 across the cutscene).
+    if (this->transformEventTimer1 >= sMaskTransformLightSteps[0].startFrame) {
+        if (this->transformEventTimer1 < sMaskTransformLightSteps[0].midFrame) {
+            Math_StepToF(&this->transformMatrixModifiers[4], 1.0f, sMaskTransformLightSteps[0].rate / 100.0f);
+        } else if (this->transformEventTimer1 < sMaskTransformLightSteps[0].endFrame) {
+            if (this->transformEventTimer1 == sMaskTransformLightSteps[0].midFrame) {
+                Sfx_PlaySfxCentered(NA_SE_EV_LIGHTNING); // FD (2026-07-11): func_800788CC->Sfx_PlaySfxCentered, no _HARD
+            }
+            Math_StepToF(&this->transformMatrixModifiers[4], 2.0f, 0.5f);
+        } else {
+            Math_StepToF(&this->transformMatrixModifiers[4], 3.0f, 0.2f);
+        }
+    }
+    // transformMatrixModifiers[5] = point-light key select + radius scale (0 -> 3).
+    if (this->transformEventTimer1 >= 0x10) {
+        if (this->transformEventTimer1 < 0x40) {
+            Math_StepToF(&this->transformMatrixModifiers[5], 1.0f, 0.2f);
+        } else if (this->transformEventTimer1 < 0x37) {
+            Math_StepToF(&this->transformMatrixModifiers[5], 2.0f, 1.0f);
+        } else {
+            Math_StepToF(&this->transformMatrixModifiers[5], 3.0f, 0.55f);
+        }
+    }
+
+    Player_UpdateTransformLights(play, this, this->transformMatrixModifiers[4], this->transformMatrixModifiers[5],
+                                 (LINK_IS_HUMAN) ? 0 : 1);
+    // TODO FD: the blue transform swirl DL (gTransformEffectDL, POLY_XLU) is drawn in z_player_lib.c gated on the
+    // asset being present in fd.o2r -- see the PLAYER_LIMB_HEAD block. The point-light glow above works regardless.
+}
+
+// RE Player_SetupMaskTransformation (~2783, func_808388B8). Enters the animated cutscene: sets the action fn,
+// plays cl_setmask (or the take-off anim), freezes control, and records the target/previous form.
+void Player_SetupMaskTransformation(PlayState* play, Player* this, u8 nextForm) {
+    // TODO forms: MM clears the Goron spike-dash sustained magic drain (MAGIC_STATE_CONSUME_GORON_ZORA) here;
+    // N/A for FD-only SoH.
+    // FD (2026-07-11) bug 14: a worn non-form mask (Bunny Hood, Mask of Truth, Keaton, etc.) is taken OFF the
+    // instant a transformation begins -- it must NOT carry into the transformed (FD) form; FD wears no mask
+    // (MM/RE remove any worn mask as the sequence starts). maskMemory is cleared too so PersistentMasks can't
+    // re-apply it onto FD across a loading zone. The FD->wearable-mask "revert then wear" path in Player_UseItem
+    // re-assigns its selected mask AFTER calling this function, so that flow is unaffected.
+    // FD (2026-07-12) #3: the "Forms Wear Trade Masks" cheat keeps a worn trade mask ON through the
+    // transformation (don't strip it); default behavior removes it (MM/RE remove any worn mask at start).
+    if (!CVarGetInteger(CVAR_CHEAT("TransformationMasks.FormsWearTradeMasks"), 0)) {
+        this->currentMask = PLAYER_MASK_NONE;
+        gSaveContext.ship.maskMemory = PLAYER_MASK_NONE;
+    }
+    func_80832564(play, this);
+    preTransformYaw = this->actor.shape.rot.y;
+    Player_SetupAction(play, this, Player_MaskTransformation, 0);
+    Player_AnimChangeOnceMorphAdjusted(play, this, sMaskAnims[gSaveContext.linkAge]);
+    this->transformTargetForm = nextForm;
+    transformFillScreenFlag = 0;
+    sFdMaskHandedOff = false;
+    sFdSettling = 0; // FD (2026-07-12) parity Gap 1: clear any leftover settle state on a fresh transform
+    this->transformPreviousForm = gSaveContext.linkAge;
+    this->transformEventTimer1 = this->transformEventTimer2 = 0;
+    Player_UseItem(play, this, ITEM_NONE);
+    Player_SetModelGroup(this, PLAYER_MODELGROUP_DEFAULT);
+    Camera_ChangeMode(Play_GetCamera(play, MAIN_CAM), CAM_MODE_NORMAL);
+    // FD (2026-07-11) Task 1: snapshot the world's adjusted lighting (RE Player_SetupMaskTransformation ~2810) so
+    // Player_UpdateTransformEnvLights can drive envCtx.adjAmbientColor.. during the cutscene without leaking; it
+    // is restored at cutscene end (see Player_MaskTransformation, RE Player_SetupEndMaskTransformation ~2669).
+    savedLightSettings = *((AdjLightSettings*)play->envCtx.adjAmbientColor);
+    this->actor.velocity.y = 0.0f;
+    Actor_DisableLens(play);
+    this->stateFlags3 |= PLAYER_STATE3_TRANSFORMATION_MASK;
+    this->stateFlags1 |= (PLAYER_STATE1_IN_ITEM_CS | PLAYER_STATE1_IN_CUTSCENE);
+    Player_ZeroSpeedXZ(this);
+    this->actor.velocity.x = this->actor.velocity.z = 0.0f;
+}
+
+// FD (2026-07-12) ANCHOR NETWORKING: map the current mask-cutscene animation to a small id (and back), so a remote
+// DummyPlayer can reproduce the held / on-face / scream mask draws (whose gates in z_player_lib.c test the animation
+// by name). On the local (sending) player the animation pointer is z_player.c's own copy, so a pointer compare is
+// exact here; the setter writes that same path string, which the DummyPlayer's strcmp gates then match.
+u8 Player_GetFdTransformAnimId(Player* this) {
+    void* a = this->skelAnime.animation;
+    if (a == (void*)gPlayerAnim_cl_setmask) {
+        return 1;
+    } else if (a == (void*)gPlayerAnim_cl_setmaskend) {
+        return 2;
+    } else if (a == (void*)gPlayerAnim_cl_maskoff) {
+        return 3;
+    } else if (a == (void*)gPlayerAnim_pz_maskoffstart) {
+        return 4;
+    }
+    return 0;
+}
+
+void Player_SetFdTransformAnimById(Player* this, u8 id, f32 curFrame) {
+    switch (id) {
+        case 1:
+            this->skelAnime.animation = (void*)gPlayerAnim_cl_setmask;
+            break;
+        case 2:
+            this->skelAnime.animation = (void*)gPlayerAnim_cl_setmaskend;
+            break;
+        case 3:
+            this->skelAnime.animation = (void*)gPlayerAnim_cl_maskoff;
+            break;
+        case 4:
+            this->skelAnime.animation = (void*)gPlayerAnim_pz_maskoffstart;
+            break;
+        default:
+            break; // no mask cutscene -- leave the animation as-is
+    }
+    this->skelAnime.curFrame = curFrame;
+}
+// ==========================================================================================================
+
+// FD (2026-07-12): zone gate -- Fierce Deity is only USABLE in a dungeon boss lair or the fishing hole (MM's
+// vanilla SCENE_*_BS gate, 2ship z_parameter.c:3402 -> OoT's SCENE_*_BOSS + the fishing-hole exception the
+// aegiker hack adds). The "FD Usable Anywhere" cheat (== 2ship's FierceDeitysAnywhere, default 0) lifts it
+// entirely. Used by the transform-in block, the C-button grayout (z_parameter.c), and the auto-revert hooks.
+s32 Player_IsFierceDeityAllowed(PlayState* play) {
+    if (CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdUsableAnywhere"), 0)) {
+        return true;
+    }
+    switch (play->sceneNum) {
+        case SCENE_DEKU_TREE_BOSS:
+        case SCENE_DODONGOS_CAVERN_BOSS:
+        case SCENE_JABU_JABU_BOSS:
+        case SCENE_FOREST_TEMPLE_BOSS:
+        case SCENE_FIRE_TEMPLE_BOSS:
+        case SCENE_WATER_TEMPLE_BOSS:
+        case SCENE_SPIRIT_TEMPLE_BOSS:
+        case SCENE_SHADOW_TEMPLE_BOSS:
+        case SCENE_GANONDORF_BOSS:
+        case SCENE_GANON_BOSS:
+        case SCENE_FISHING_POND:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void Player_UseItem(PlayState* play, Player* this, s32 item) {
     s8 itemAction;
     s32 temp;
@@ -3413,13 +4349,87 @@ void Player_UseItem(PlayState* play, Player* this, s32 item) {
 
     itemAction = Player_ItemToItemAction(item);
 
+    // FD (2026-07-11) Task 2: Fierce Deity equipment behavior (RE z_player.c Player_UseItem gate ~5151).
+    // FD (2026-07-12): EXCLUDE the minigame scenes (fishing pond + bombchu bowling) from the deity item
+    // restriction, unconditionally -- otherwise the fishing rod / bombchu, which the minigame force-equips onto
+    // B, would be denied here (ITEM_FISHING_POLE isn't in the deity allowlist) and FD couldn't fish. The RE
+    // excludes bombchu bowling here (fd_build z_player.c:5151); the fishing pond needs the same so the rod works.
+    // (The FD-sword-force in Player_UpdateCommon already skips these scenes, so B keeps the minigame item.)
+    if (LINK_IS_DEITY && (item != ITEM_NONE) && (item != ITEM_NONE_FE) && (item != ITEM_LAST_USED) &&
+        (play->sceneNum != SCENE_FISHING_POND) && (play->sceneNum != SCENE_BOMBCHU_BOWLING_ALLEY)) {
+        // 2Ship behavior: selecting a normal wearable mask (Keaton..Truth) as Deity FIRST reverts, THEN wears
+        // it. currentMask persists across the age swap, so it shows once back in human form.
+        if ((itemAction >= PLAYER_IA_MASK_KEATON) && (itemAction <= PLAYER_IA_MASK_TRUTH)) {
+            u8 wornMask = itemAction - PLAYER_IA_MASK_KEATON + 1;
+            // FD (2026-07-12) #3: with the "Forms Wear Trade Masks" cheat, wear the trade mask directly ON the
+            // form (no un-transform) -- currentMask draws the mask on the transformed model. TOGGLE it (press
+            // the same mask again to take it off), matching the normal wearable-mask branch below -- otherwise a
+            // form could put a mask ON but never take it OFF without un-transforming (the reported bug).
+            if (CVarGetInteger(CVAR_CHEAT("TransformationMasks.FormsWearTradeMasks"), 0)) {
+                this->currentMask = (this->currentMask == wornMask) ? PLAYER_MASK_NONE : wornMask;
+                gSaveContext.ship.maskMemory = this->currentMask;
+                // FD (2026-07-12) #5: play the mask don/doff sound, matching the normal wearable-mask branch below
+                // (func_808328EC NA_SE_PL_CHANGE_ARMS at ~4424) -- the FD cheat path was silently toggling the mask.
+                func_808328EC(this, NA_SE_PL_CHANGE_ARMS);
+                return;
+            }
+            u8 prevForm = gSaveContext.ship.fierceDeityPreviousForm;
+            if (prevForm > LINK_AGE_CHILD) {
+                prevForm = LINK_AGE_ADULT; // safety clamp
+            }
+            Player_SetupMaskTransformation(play, this, prevForm); // start the un-transform back to human
+            // FD (2026-07-11) bug 14: assign the carry-through mask AFTER setup. Player_SetupMaskTransformation
+            // now strips any worn mask on transform start (so a worn mask can't ride into FD); set the
+            // deliberately-selected mask here so it survives the strip and shows once back in human form.
+            this->currentMask = wornMask;
+            gSaveContext.ship.maskMemory = wornMask;
+            return;
+        }
+        // FD (2026-07-11) bug 9: Fierce Deity's usable-item set, matched EXACTLY to the RE's gItemDeityUsability
+        // table (fd_build z_parameter.c:352, consulted via Parameter_CanUseItem @ fd_build z_player.c:5152). FD
+        // may use ONLY: the FD sword, the Master Sword (exempted so the base weapon path still works), the FD
+        // mask (to revert), bottles (empty + any contents), and adult/child trade-quest items. NOTHING else --
+        // notably NOT the Lens of Truth and NOT the magic spells (Din's Fire / Farore's Wind / Nayru's Love),
+        // all of which are 0 in the RE table, and NOT the Magic Bean (also 0). This is the FD restriction: it is
+        // always on while Deity (gated by the enclosing LINK_IS_DEITY block) and is deliberately INDEPENDENT of
+        // the "timeless equipment" cheat, which lets adult/child share items and is handled elsewhere.
+        {
+            s32 allowed =
+                (item == ITEM_SWORD_DEITY) || (item == ITEM_SWORD_MASTER) || (itemAction == PLAYER_IA_MASK_DEITY) ||
+                // bottles: PLAYER_IA_BOTTLE .. PLAYER_IA_BOTTLE_FAIRY (contiguous, all contents)
+                ((itemAction >= PLAYER_IA_BOTTLE) && (itemAction <= PLAYER_IA_BOTTLE_FAIRY)) ||
+                // adult/child trade-quest items: PLAYER_IA_ZELDAS_LETTER .. PLAYER_IA_CLAIM_CHECK, minus the
+                // Magic Bean (which is interleaved in the enum at PLAYER_IA_MAGIC_BEAN and is NOT FD-usable).
+                (((itemAction >= PLAYER_IA_ZELDAS_LETTER) && (itemAction <= PLAYER_IA_CLAIM_CHECK)) &&
+                 (itemAction != PLAYER_IA_MAGIC_BEAN)) ||
+                // FD (2026-07-12) #4: the "FD Can Play Ocarina" cheat lets the deity use the ocarina.
+                (((itemAction == PLAYER_IA_OCARINA_FAIRY) || (itemAction == PLAYER_IA_OCARINA_OF_TIME)) &&
+                 CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdCanPlayOcarina"), 0)) ||
+                // FD (2026-07-15): also honor the full deity usability oracle here -- Parameter_CanUseItem encodes
+                // the same base allowlist PLUS the "Unrestrict Items for FD" / Roc's Feather cheats. Without this,
+                // this second gate (used by non-aiming items like Din's Fire / Farore's Wind) kept denying cheat-
+                // allowed items even though the press gate at ~2616 already let them through. Master Sword stays
+                // exempted above (Parameter_CanUseItem doesn't allow it) so the base weapon path still works.
+                Parameter_CanUseItem(item);
+            if (!allowed) {
+                Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
+                return;
+            }
+        }
+    }
+
     if (((this->heldItemAction == this->itemAction) &&
          (!(this->stateFlags1 & PLAYER_STATE1_SHIELDING) || (Player_ActionToMeleeWeapon(itemAction) != 0) ||
           (itemAction == PLAYER_IA_NONE))) ||
         ((this->itemAction < 0) && ((Player_ActionToMeleeWeapon(itemAction) != 0) || (itemAction == PLAYER_IA_NONE)))) {
 
         if ((itemAction == PLAYER_IA_NONE) || !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) ||
-            ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) &&
+            // FD (2026-07-12) #2: allow the FD mask to transform/un-transform while swimming at the water surface,
+            // like the aegiker hack. MM exempts the Zora mask from the in-water item block for the same reason (RE
+            // z_player.c:5164 -- PLAYER_IA_MASK_ZORA is donnable while swimming); the FD transform mask gets the same
+            // carve-out so a player can become / revert from Fierce Deity without first climbing out of the water.
+            (itemAction == PLAYER_IA_MASK_DEITY) ||
+            ((this->actor.bgCheckFlags & 1) &&
              ((itemAction == PLAYER_IA_HOOKSHOT) || (itemAction == PLAYER_IA_LONGSHOT)))) {
 
             if ((play->bombchuBowlingStatus == 0) &&
@@ -3461,6 +4471,37 @@ void Player_UseItem(PlayState* play, Player* this, s32 item) {
                 } else {
                     Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
                 }
+            } else if (itemAction == PLAYER_IA_MASK_DEITY) {
+                // FD (2026-07-11) Task 1: Deity Mask -> ANIMATED mask-transform cutscene (RE z_player.c
+                // Player_SetupMaskTransformation / Player_MaskTransformation). Must precede the wearable-mask
+                // branch below: PLAYER_IA_MASK_DEITY(0x43) >= PLAYER_IA_MASK_KEATON, so it would otherwise be
+                // toggled on as an ordinary face mask.
+                //
+                // Player_SetupMaskTransformation drives the cl_setmask animation, scream sfx and one-point
+                // camera IN FRONT of the existing white fade; at the cutscene apex it arms play->ageChangeFlag
+                // ONCE so the EXISTING Player_Draw apex commit still does the age/skeleton swap + FD-sword-on-B
+                // stash/restore (gSaveContext.ship.*). No double commit -- see the HANDOFF note above.
+                if ((play->ageChangeFlag < 0) &&
+                    !(this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK)) { // ignore a re-press mid-transform
+                    u8 nextForm;
+                    if (LINK_IS_DEITY) {
+                        // Revert: transform back to the REAL prior age (not always adult). ALWAYS allowed,
+                        // regardless of zone, so the player can never get stuck as Fierce Deity.
+                        nextForm = gSaveContext.ship.fierceDeityPreviousForm;
+                        if (nextForm > LINK_AGE_CHILD) { nextForm = LINK_AGE_ADULT; } // safety clamp
+                    } else {
+                        // FD (2026-07-12) #C: only transform INTO Fierce Deity inside a boss lair / fishing hole
+                        // (or with the FdUsableAnywhere cheat). Out of zone -> error tone + abort (the grayed
+                        // C-button, like a weapon in a safe room). Reverting OUT is handled above, always.
+                        if (!Player_IsFierceDeityAllowed(play)) {
+                            Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
+                            return;
+                        }
+                        nextForm = LINK_AGE_DEITY; // become Fierce Deity
+                    }
+                    Player_SetupMaskTransformation(play, this, nextForm);
+                }
+                return;
             } else if (itemAction >= PLAYER_IA_MASK_KEATON) {
                 // Handle wearable masks
                 if (this->currentMask != PLAYER_MASK_NONE) {
@@ -3477,7 +4518,7 @@ void Player_UseItem(PlayState* play, Player* this, s32 item) {
                 // Handle "cutscene items"
                 if (!Player_CheckHostileLockOn(this) ||
                     ((itemAction >= PLAYER_IA_BOTTLE_POTION_RED) && (itemAction <= PLAYER_IA_BOTTLE_FAIRY))) {
-                    TitleCard_Clear(play, &play->actorCtx.titleCtx);
+                    func_8002D53C(play, &play->actorCtx.titleCtx);
                     this->unk_6AD = 4;
                     this->itemAction = itemAction;
                 }
@@ -3529,21 +4570,21 @@ void func_80836448(PlayState* play, Player* this, LinkAnimationHeader* anim) {
     Player_PlayVoiceSfx(this, NA_SE_VO_LI_DOWN);
 
     if (this->actor.category == ACTORCAT_PLAYER) {
-        Audio_SetBgmVolumeOffDuringFanfare();
+        func_800F47BC();
 
         if (Inventory_ConsumeFairy(play)) {
             play->gameOverCtx.state = GAMEOVER_REVIVE_START;
             this->av1.actionVar1 = 1;
         } else {
             play->gameOverCtx.state = GAMEOVER_DEATH_START;
-            Audio_StopBgmAndFanfare(0);
+            func_800F6AB0(0);
             Audio_PlayFanfare(NA_BGM_GAME_OVER);
             gSaveContext.seqId = (u8)NA_BGM_DISABLED;
             gSaveContext.natureAmbienceId = NATURE_ID_DISABLED;
         }
 
-        OnePointCutscene_Init(play, 9806, cond ? 120 : 60, &this->actor, CAM_ID_MAIN);
-        Letterbox_SetSizeTarget(32);
+        OnePointCutscene_Init(play, 9806, cond ? 120 : 60, &this->actor, MAIN_CAM);
+        ShrinkWindow_SetVal(0x20);
     }
 }
 
@@ -3574,10 +4615,7 @@ int Player_CanUpdateItems(Player* this) {
  * depending on some conditions. See details below.
  */
 s32 Player_UpdateUpperBody(Player* this, PlayState* play) {
-    if (this->actor.parent != NULL &&
-        GameInteractor_Should(VB_PREVENT_HOOKSHOT_PARENT_SOFTLOCK,
-                              !(this->stateFlags1 & PLAYER_STATE1_ON_HORSE) && Player_HoldsHookshot(this),
-                              &this->actor.parent->id)) {
+    if (!(this->stateFlags1 & PLAYER_STATE1_ON_HORSE) && (this->actor.parent != NULL) && Player_HoldsHookshot(this)) {
         Player_SetupAction(play, this, Player_Action_80850AEC, 1);
         this->stateFlags3 |= PLAYER_STATE3_FLYING_WITH_HOOKSHOT;
         Player_AnimPlayOnce(play, this, &gPlayerAnim_link_hook_fly_start);
@@ -3587,7 +4625,26 @@ s32 Player_UpdateUpperBody(Player* this, PlayState* play) {
         this->actor.bgCheckFlags &= ~1;
         this->hoverBootsTimer = 0;
         this->unk_6AE_rotFlags |= UNK6AE_ROT_FOCUS_X | UNK6AE_ROT_FOCUS_Y | UNK6AE_ROT_UPPER_X;
-        Player_PlayVoiceSfx(this, NA_SE_VO_LI_LASH);
+        // FD (2026-07-15): "MM Young Link Hookshot Sound" (Bonus Settings, default on). Only for CHILD (who can use
+        // the hookshot via Timeless Equipment) -- play his own Majora's Mask grapple voice instead of the shared
+        // OoT one. Adult (linkAge 0) and Fierce Deity (linkAge 2) always keep NA_SE_VO_LI_LASH. Graceful: if the MM
+        // WAV isn't present in fd.o2r, FdAudio_PlayOneShot returns false and we fall back to the vanilla voice path
+        // (Player_PlayVoiceSfx offsets to the child slot 0x22 for a genuine child), so the toggle can never break
+        // audio. NOTE: only the VOICE fires at the hookshot latch; the whip-crack NA_SE_IT_LASH (age-neutral) is not
+        // played here -- it only pairs with the voice at the Epona spur.
+        if ((gSaveContext.linkAge == LINK_AGE_CHILD) &&
+            CVarGetInteger(CVAR_ENHANCEMENT("BonusSettings.MmYoungLinkHookshotSound"), 1)) {
+            // MM's NA_SE_VO_LI_LASH voice randomly alternates between two whip/lash grunts, so pick one of the two
+            // MM samples 50/50 each hookshot. Graceful: if neither WAV is present in fd.o2r, FdAudio returns false
+            // and we fall back to the vanilla child voice.
+            const char* whip =
+                (Rand_ZeroOne() < 0.5f) ? "custom/samples/yl/YL_Whip1.wav" : "custom/samples/yl/YL_Whip2.wav";
+            if (!FdAudio_PlayOneShot(whip)) {
+                Player_PlayVoiceSfx(this, NA_SE_VO_LI_LASH);
+            }
+        } else {
+            Player_PlayVoiceSfx(this, NA_SE_VO_LI_LASH);
+        }
         return true;
     }
 
@@ -3867,7 +4924,7 @@ void Player_UpdateZTargeting(Player* this, PlayState* play) {
 
             if (this->focusActor != NULL) {
                 if ((this->actor.category == ACTORCAT_PLAYER) && (this->focusActor != this->autoLockOnActor) &&
-                    Attention_ShouldReleaseLockOn(this->focusActor, this, ignoreLeash)) {
+                    func_8002F0C8(this->focusActor, this, ignoreLeash)) {
                     Player_ReleaseLockOn(this);
                     this->stateFlags1 |= PLAYER_STATE1_LOCK_ON_FORCED_TO_RELEASE;
                 } else if (this->focusActor != NULL) {
@@ -3967,6 +5024,13 @@ s32 Player_CalcSpeedAndYawFromControlStick(PlayState* play, Player* this, f32* o
         } else {
             // Speed increases linearly relative to control stick magnitude
             *outSpeedTarget *= 0.8f;
+        }
+
+        // FD (2026-07-12): Fierce Deity moves 1.5x faster (MM Player_CalcSpeedAndYawFromControlStick
+        // z_player.c:4844). Applied here to the curved/linear speed target, BEFORE the *0.14 scale and
+        // speedCap clamp below, exactly as MM does. Child/adult are unscaled (1.0x).
+        if (LINK_IS_DEITY) {
+            *outSpeedTarget *= 1.5f;
         }
 
         if (sControlStickMagnitude != 0.0f) {
@@ -4244,7 +5308,12 @@ s32 Player_TryActionInterrupt(PlayState* play, Player* this, SkelAnime* skelAnim
     return PLAYER_INTERRUPT_NONE;
 }
 
-void func_80837530(PlayState* play, Player* this, s32 arg2) {
+// FD (2026-07-12) beam aim: rotx = the beam's initial pitch (world.rot.x). MM/2ship pass the pitch toward the
+// Z-targeted enemy here (Math_Vec3f_Pitch(waist, lockOnActor->focus.pos)) so FD's sword beams angle up/down at a
+// target above/below (Gyorg, Majora's Incarnation); En_M_Thunder's SwordBeamAttack drives y += -80*sin(rotx) and
+// xz += -80*cos(rotx) from it. Non-beam callers (spin/charge) pass 0 for a level swing. The SoH signature had no
+// rotx and always spawned the beam horizontal -- this restores the vertical aim (RE fd_build z_player.c:5662).
+void func_80837530(PlayState* play, Player* this, s32 arg2, s16 rotx) {
     if (arg2 != 0) {
         this->unk_858 = 0.0f;
     } else {
@@ -4255,8 +5324,8 @@ void func_80837530(PlayState* play, Player* this, s32 arg2) {
 
     if (this->actor.category == ACTORCAT_PLAYER) {
         Actor_Spawn(&play->actorCtx, play, ACTOR_EN_M_THUNDER, this->bodyPartsPos[PLAYER_BODYPART_WAIST].x,
-                    this->bodyPartsPos[PLAYER_BODYPART_WAIST].y, this->bodyPartsPos[PLAYER_BODYPART_WAIST].z, 0, 0, 0,
-                    Player_GetMeleeWeaponHeld(this) | arg2);
+                    this->bodyPartsPos[PLAYER_BODYPART_WAIST].y, this->bodyPartsPos[PLAYER_BODYPART_WAIST].z, rotx, 0,
+                    0, Player_GetMeleeWeaponHeld(this) | arg2);
     }
 }
 
@@ -4318,7 +5387,19 @@ void func_80837704(PlayState* play, Player* this) {
 
     func_80832318(this);
     LinkAnimation_Change(play, &this->skelAnime, anim, 1.0f, 8.0f, Animation_GetLastFrame(anim), ANIMMODE_ONCE, -9.0f);
-    func_80837530(play, this, 0x200);
+    // FD (2026-07-12) #5 hold-B "sword-stance": the stance anim (above) plays for FD; MM (func_808332A0, mm
+    // z_player.c:5164) suppresses the charge EN_M_THUNDER *disk* for a non-human form but still marks the charge
+    // state, so FD gets a magicless stance -> release fires a bare (diskless) spin. This fork suppressed the disk
+    // (correct) which also skipped func_80837530's `unk_858=0 + set CHARGING`; re-apply that MM charge-start state
+    // for FD so the stance is byte-in-line with MM (fixes a stale-charge edge case). The disk itself follows the
+    // same "FD Magic Spin" cheat as the quickspin (#6): off = MM magicless stance, on = RE/aegiker magic charge.
+    // (Suppressing the disk also avoids the old MAGIC_CONSUME_WAIT_PREVIEW refund that stuck the meter blue.)
+    if (!LINK_IS_DEITY || CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdMagicSpin"), 0)) {
+        func_80837530(play, this, 0x200, 0); // spin-attack disk: level (no target pitch)
+    } else {
+        this->unk_858 = 0.0f;
+        this->stateFlags1 |= PLAYER_STATE1_CHARGING_SPIN_ATTACK;
+    }
 }
 
 void func_808377DC(PlayState* play, Player* this) {
@@ -4536,7 +5617,7 @@ void func_80837C0C(PlayState* play, Player* this, s32 damageResponseType, f32 sp
 
     if (!func_80837B18(play, this, 0 - this->actor.colChkInfo.damage)) {
         this->stateFlags2 &= ~PLAYER_STATE2_GRABBED_BY_ENEMY;
-        if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && !(this->stateFlags1 & PLAYER_STATE1_IN_WATER)) {
+        if (!(this->actor.bgCheckFlags & 1) && !(this->stateFlags1 & PLAYER_STATE1_IN_WATER)) {
             func_80837B9C(this, play);
         }
         return;
@@ -4544,7 +5625,7 @@ void func_80837C0C(PlayState* play, Player* this, s32 damageResponseType, f32 sp
 
     Player_SetIntangibility(this, invincibilityTimer);
 
-    if (damageResponseType == PLAYER_HIT_RESPONSE_FROZEN) {
+    if (damageResponseType == PLAYER_HIT_RESPONSE_ICE_TRAP) {
         Player_SetupAction(play, this, Player_Action_8084FB10, 0);
 
         anim = &gPlayerAnim_link_normal_ice_down;
@@ -4554,7 +5635,7 @@ void func_80837C0C(PlayState* play, Player* this, s32 damageResponseType, f32 sp
 
         Player_PlaySfx(this, NA_SE_PL_FREEZE_S);
         Player_PlayVoiceSfx(this, NA_SE_VO_LI_FREEZE);
-    } else if (damageResponseType == PLAYER_HIT_RESPONSE_ELECTRIFIED) {
+    } else if (damageResponseType == PLAYER_HIT_RESPONSE_ELECTRIC_SHOCK) {
         Player_SetupAction(play, this, Player_Action_8084FBF4, 0);
 
         Player_RequestRumble(this, 255, 80, 150, 0);
@@ -4576,8 +5657,7 @@ void func_80837C0C(PlayState* play, Player* this, s32 damageResponseType, f32 sp
 
             Player_PlayVoiceSfx(this, NA_SE_VO_LI_DAMAGE_S);
         } else if ((damageResponseType == PLAYER_HIT_RESPONSE_KNOCKBACK_LARGE) ||
-                   (damageResponseType == PLAYER_HIT_RESPONSE_KNOCKBACK_SMALL) ||
-                   !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
+                   (damageResponseType == PLAYER_HIT_RESPONSE_KNOCKBACK_SMALL) || !(this->actor.bgCheckFlags & 1) ||
                    (this->stateFlags1 &
                     (PLAYER_STATE1_HANGING_OFF_LEDGE | PLAYER_STATE1_CLIMBING_LEDGE | PLAYER_STATE1_CLIMBING_LADDER))) {
             Player_SetupAction(play, this, Player_Action_8084377C, 0);
@@ -4615,7 +5695,7 @@ void func_80837C0C(PlayState* play, Player* this, s32 damageResponseType, f32 sp
             }
 
             this->hoverBootsTimer = 0;
-            this->actor.bgCheckFlags &= ~BGCHECKFLAG_GROUND;
+            this->actor.bgCheckFlags &= ~1;
         } else {
             if ((this->linearVelocity > 4.0f) && !Player_CheckHostileLockOn(this)) {
                 this->unk_890 = 20;
@@ -4682,7 +5762,7 @@ int func_8083816C(s32 arg0) {
 }
 
 void func_8083819C(Player* this, PlayState* play) {
-    if (GameInteractor_Should(VB_BURN_SHIELD, this->currentShield == PLAYER_SHIELD_DEKU, this)) {
+    if (this->currentShield == PLAYER_SHIELD_DEKU && (CVarGetInteger(CVAR_CHEAT("FireproofDekuShield"), 0) == 0)) {
         Actor_Spawn(&play->actorCtx, play, ACTOR_ITEM_SHIELD, this->actor.world.pos.x, this->actor.world.pos.y,
                     this->actor.world.pos.z, 0, 0, 0, 1);
         Inventory_DeleteEquipment(play, EQUIP_TYPE_SHIELD);
@@ -4727,7 +5807,7 @@ s32 func_808382DC(Player* this, PlayState* play) {
     } else {
         sp68 = ((Player_GetHeight(this) - 8.0f) < (this->unk_6C4 * this->actor.scale.y));
 
-        if (sp68 || (this->actor.bgCheckFlags & BGCHECKFLAG_CRUSHED) || (sFloorType == 9) ||
+        if (sp68 || (this->actor.bgCheckFlags & 0x100) || (sFloorType == 9) ||
             (this->stateFlags2 & PLAYER_STATE2_FORCED_VOID_OUT)) {
             Player_PlayVoiceSfx(this, NA_SE_VO_LI_DAMAGE_S);
 
@@ -4760,7 +5840,7 @@ s32 func_808382DC(Player* this, PlayState* play) {
             }
 
             Player_PlayVoiceSfx(this, NA_SE_VO_LI_TAKEN_AWAY);
-            play->haltAllActors = true;
+            play->unk_11DE9 = 1;
             Sfx_PlaySfxCentered(NA_SE_OC_ABYSS);
         } else if ((this->knockbackType != PLAYER_KNOCKBACK_NONE) &&
                    ((this->knockbackType >= PLAYER_KNOCKBACK_LARGE) || (this->invincibilityTimer == 0))) {
@@ -4772,7 +5852,7 @@ s32 func_808382DC(Player* this, PlayState* play) {
 
             func_80838280(this);
 
-            if (this->knockbackType == PLAYER_KNOCKBACK_LARGE_ELECTRIFIED) {
+            if (this->knockbackType == PLAYER_KNOCKBACK_LARGE_SHOCK) {
                 this->bodyShockTimer = 40;
             }
 
@@ -4828,7 +5908,7 @@ s32 func_808382DC(Player* this, PlayState* play) {
                     }
                 }
 
-                if (sp64 && (this->shieldQuad.info.acHitInfo->toucher.effect == HIT_SPECIAL_EFFECT_FIRE)) {
+                if (sp64 && (this->shieldQuad.info.acHitInfo->toucher.effect == 1)) {
                     func_8083819C(this, play);
                 }
 
@@ -4851,11 +5931,11 @@ s32 func_808382DC(Player* this, PlayState* play) {
 
                 if (this->stateFlags1 & PLAYER_STATE1_IN_WATER) {
                     sp4C = PLAYER_HIT_RESPONSE_NONE;
-                } else if (this->actor.colChkInfo.acHitEffect == HIT_SPECIAL_EFFECT_ICE) {
-                    sp4C = PLAYER_HIT_RESPONSE_FROZEN;
-                } else if (this->actor.colChkInfo.acHitEffect == HIT_SPECIAL_EFFECT_ELECTRIC) {
-                    sp4C = PLAYER_HIT_RESPONSE_ELECTRIFIED;
-                } else if (this->actor.colChkInfo.acHitEffect == HIT_SPECIAL_EFFECT_KNOCKBACK) {
+                } else if (this->actor.colChkInfo.acHitEffect == 2) {
+                    sp4C = PLAYER_HIT_RESPONSE_ICE_TRAP;
+                } else if (this->actor.colChkInfo.acHitEffect == 3) {
+                    sp4C = PLAYER_HIT_RESPONSE_ELECTRIC_SHOCK;
+                } else if (this->actor.colChkInfo.acHitEffect == 4) {
                     sp4C = PLAYER_HIT_RESPONSE_KNOCKBACK_LARGE;
                 } else {
                     func_80838280(this);
@@ -4899,7 +5979,7 @@ void func_80838940(Player* this, LinkAnimationHeader* anim, f32 arg2, PlayState*
 
     this->actor.velocity.y = arg2 * sWaterSpeedFactor;
     this->hoverBootsTimer = 0;
-    this->actor.bgCheckFlags &= ~BGCHECKFLAG_GROUND;
+    this->actor.bgCheckFlags &= ~1;
 
     Player_PlayJumpingSfx(this);
     Player_PlayVoiceSfx(this, sfxId);
@@ -4926,16 +6006,14 @@ s32 Player_ActionHandler_12(Player* this, PlayState* play) {
 
         if (func_808332B8(this)) {
             if (this->actor.yDistToWater < 50.0f) {
-                if ((this->ledgeClimbType < PLAYER_LEDGE_CLIMB_2) ||
-                    (this->yDistToLedge > this->ageProperties->unk_10)) {
+                if ((this->ledgeClimbType < 2) || (this->yDistToLedge > this->ageProperties->unk_10)) {
                     return 0;
                 }
-            } else if ((this->currentBoots != PLAYER_BOOTS_IRON) || (this->ledgeClimbType > PLAYER_LEDGE_CLIMB_2)) {
+            } else if ((this->currentBoots != PLAYER_BOOTS_IRON) || (this->ledgeClimbType > 2)) {
                 return 0;
             }
-        } else if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
-                   ((this->ageProperties->unk_14 <= this->yDistToLedge) &&
-                    (this->stateFlags1 & PLAYER_STATE1_IN_WATER))) {
+        } else if (!(this->actor.bgCheckFlags & 1) || ((this->ageProperties->unk_14 <= this->yDistToLedge) &&
+                                                       (this->stateFlags1 & PLAYER_STATE1_IN_WATER))) {
             return 0;
         }
 
@@ -4997,8 +6075,7 @@ s32 Player_ActionHandler_12(Player* this, PlayState* play) {
 
             return 1;
         }
-    } else if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && (this->ledgeClimbType == 1) &&
-               (this->ledgeClimbDelayTimer >= 3)) {
+    } else if ((this->actor.bgCheckFlags & 1) && (this->ledgeClimbType == 1) && (this->ledgeClimbDelayTimer >= 3)) {
         temp = (this->yDistToLedge * 0.08f) + 5.5f;
         func_808389E8(this, &gPlayerAnim_link_normal_jump, temp, play);
         this->linearVelocity = 2.5f;
@@ -5032,7 +6109,7 @@ void func_80838F5C(PlayState* play, Player* this) {
 
     this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE | PLAYER_STATE1_FLOOR_DISABLED;
 
-    Camera_RequestSetting(Play_GetCamera(play, CAM_ID_MAIN), CAM_SET_FREE0);
+    Camera_ChangeSetting(Play_GetCamera(play, 0), CAM_SET_FREE0);
 }
 
 s32 func_80838FB8(PlayState* play, Player* this) {
@@ -5111,7 +6188,7 @@ s32 Player_HandleExitsAndVoids(PlayState* play, Player* this, CollisionPoly* pol
         exitIndex = 0;
 
         if (!(this->stateFlags1 & PLAYER_STATE1_DEAD) && (play->transitionTrigger == TRANS_TRIGGER_OFF) &&
-            (this->csAction == PLAYER_CSACTION_NONE) && !(this->stateFlags1 & PLAYER_STATE1_LOADING) &&
+            (this->csAction == 0) && !(this->stateFlags1 & PLAYER_STATE1_LOADING) &&
             (((poly != NULL) &&
               (exitIndex = SurfaceType_GetSceneExitIndex(&play->colCtx, poly, bgId), exitIndex != 0)) ||
              (func_8083816C(sFloorType) && (this->floorProperty == 12)))) {
@@ -5119,7 +6196,7 @@ s32 Player_HandleExitsAndVoids(PlayState* play, Player* this, CollisionPoly* pol
             sp34 = this->unk_A84 - (s32)this->actor.world.pos.y;
 
             if (!(this->stateFlags1 & (PLAYER_STATE1_ON_HORSE | PLAYER_STATE1_IN_WATER | PLAYER_STATE1_IN_CUTSCENE)) &&
-                !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && (sp34 < 100) && (sYDistToFloor > 100.0f)) {
+                !(this->actor.bgCheckFlags & 1) && (sp34 < 100) && (sYDistToFloor > 100.0f)) {
                 return 0;
             }
 
@@ -5157,7 +6234,7 @@ s32 Player_HandleExitsAndVoids(PlayState* play, Player* this, CollisionPoly* pol
                     Scene_SetTransitionForNextEntrance(play);
                 } else {
                     if (GameInteractor_Should(VB_SET_VOIDOUT_FROM_SURFACE,
-                                              SurfaceType_GetFloorEffect(&play->colCtx, poly, bgId) == 2,
+                                              SurfaceType_GetSlope(&play->colCtx, poly, bgId) == 2,
                                               play->setupExitList[exitIndex - 1])) {
                         gSaveContext.respawn[RESPAWN_MODE_DOWN].entranceIndex = play->nextEntranceIndex;
                         if (GameInteractor_Should(VB_TRIGGER_VOIDOUT, true, this)) {
@@ -5173,8 +6250,8 @@ s32 Player_HandleExitsAndVoids(PlayState* play, Player* this, CollisionPoly* pol
 
             if (!(this->stateFlags1 & (PLAYER_STATE1_ON_HORSE | PLAYER_STATE1_IN_CUTSCENE)) &&
                 !(this->stateFlags2 & PLAYER_STATE2_CRAWLING) && !func_808332B8(this) &&
-                (temp = SurfaceType_GetFloorType(&play->colCtx, poly, bgId), (temp != 10)) &&
-                ((sp34 < 100) || (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND))) {
+                (temp = func_80041D4C(&play->colCtx, poly, bgId), (temp != 10)) &&
+                ((sp34 < 100) || (this->actor.bgCheckFlags & 1))) {
 
                 if (temp == 11) {
                     Sfx_PlaySfxCentered2(NA_SE_OC_SECRET_HOLE_OUT);
@@ -5203,14 +6280,14 @@ s32 Player_HandleExitsAndVoids(PlayState* play, Player* this, CollisionPoly* pol
                     func_80838E70(play, this, 400.0f, yaw);
                 }
             } else {
-                if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+                if (!(this->actor.bgCheckFlags & 1)) {
                     Player_ZeroSpeedXZ(this);
                 }
             }
 
             this->stateFlags1 |= PLAYER_STATE1_LOADING | PLAYER_STATE1_IN_CUTSCENE;
 
-            Player_RequestCameraSetting(play, CAM_SET_SCENE_TRANSITION);
+            func_80835E44(play, 0x2F);
 
             return 1;
         } else {
@@ -5222,7 +6299,7 @@ s32 Player_HandleExitsAndVoids(PlayState* play, Player* this, CollisionPoly* pol
                       ((play->sceneNum != SCENE_SHADOW_TEMPLE) && (this->fallDistance > 200.0f)))) ||
                     ((play->sceneNum == SCENE_GANONS_TOWER_COLLAPSE_EXTERIOR) && (this->fallDistance > 320.0f))) {
 
-                    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+                    if (this->actor.bgCheckFlags & 1) {
                         if (this->floorProperty == 5) {
                             Play_TriggerRespawn(play);
                         } else if (GameInteractor_Should(VB_TRIGGER_VOIDOUT, true, this)) {
@@ -5374,7 +6451,7 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
 
                 if (doorShutter->dyna.actor.category == ACTORCAT_DOOR) {
                     this->cv.slidingDoorBgCamIndex =
-                        play->transiActorCtx.list[GET_TRANSITION_ACTOR_INDEX(&doorShutter->dyna.actor)]
+                        play->transiActorCtx.list[(u16)doorShutter->dyna.actor.params >> 10]
                             .sides[(doorDirection > 0) ? 0 : 1]
                             .effects;
 
@@ -5386,8 +6463,16 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
                 // are common across the two actors' structs however most other variables are not!
                 door = (EnDoor*)doorActor;
 
-                door->animStyle = (doorDirection < 0.0f) ? (LINK_IS_ADULT ? KNOB_ANIM_ADULT_L : KNOB_ANIM_CHILD_L)
-                                                         : (LINK_IS_ADULT ? KNOB_ANIM_ADULT_R : KNOB_ANIM_CHILD_R);
+                // FD (2026-07-13): a Fierce Deity is age DEITY, so LINK_IS_ADULT is false -- a child-underlying FD
+                // would otherwise grab the door with Young Link's CHILD animation (doorA/doorB) at child proportions.
+                // With the door-fix toggle on, treat FD as an adult here so he uses the ADULT door animation
+                // (doorA_free/doorB_free), matching the adult age-properties the fix applies in Player_UpdateCommon.
+                // FD (2026-07-13): always on -- it looks correct with no downside, so the toggle was retired.
+                s32 fdDoorAsAdult = (gSaveContext.linkAge == LINK_AGE_DEITY)
+                                    /* && CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.DoorScaleFix"), 1) */;
+                door->animStyle =
+                    (doorDirection < 0.0f) ? ((LINK_IS_ADULT || fdDoorAsAdult) ? KNOB_ANIM_ADULT_L : KNOB_ANIM_CHILD_L)
+                                           : ((LINK_IS_ADULT || fdDoorAsAdult) ? KNOB_ANIM_ADULT_R : KNOB_ANIM_CHILD_R);
 
                 if (door->animStyle == KNOB_ANIM_ADULT_L) {
                     sp5C = GET_PLAYER_ANIM(PLAYER_ANIMGROUP_doorA_free, this->modelAnimType);
@@ -5401,6 +6486,18 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
 
                 Player_SetupAction(play, this, Player_Action_80845EF8, 0);
                 Player_PutAwayHeldItem(play, this);
+
+                // FD (2026-07-13): door-sink fix (see the matching block in Player_UpdateCommon). The door demo
+                // animation is authored for a 0.01-scale adult. FD's age-properties inflate the animation's baked
+                // vertical motion by his 1.5x height factor (unk_08): the Player_StartAnimMovement below carries the
+                // RESET_BY_AGE flag, so prevTransl.y is multiplied by unk_08 and the root is yanked below the floor
+                // from frame one. Swap FD to adult age-properties (unk_08 = 1.0) BEFORE that call so the baseline
+                // isn't inflated; Player_UpdateCommon keeps him on adult properties for the rest of the door action
+                // and restores the deity properties the instant it ends. FD-only; always on (toggle retired).
+                if ((gSaveContext.linkAge == LINK_AGE_DEITY)
+                    /* && CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.DoorScaleFix"), 1) */) {
+                    this->ageProperties = &sAgeProperties[LINK_AGE_ADULT];
+                }
 
                 if (doorDirection < 0) {
                     this->actor.shape.rot.y = doorActor->shape.rot.y;
@@ -5427,7 +6524,7 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
                     doorDirection = -doorDirection;
                 }
 
-                door->playerIsOpening = true;
+                door->playerIsOpening = 1;
 
                 if (this->doorType != PLAYER_DOORTYPE_FAKE) {
                     this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE;
@@ -5447,8 +6544,8 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
                             gSaveContext.entranceSound = NA_SE_OC_DOOR_OPEN;
                         }
                     } else {
-                        Camera_ChangeDoorCam(Play_GetCamera(play, CAM_ID_MAIN), doorActor,
-                                             play->transiActorCtx.list[GET_TRANSITION_ACTOR_INDEX(doorActor)]
+                        Camera_ChangeDoorCam(Play_GetCamera(play, 0), doorActor,
+                                             play->transiActorCtx.list[(u16)doorActor->params >> 10]
                                                  .sides[(doorDirection > 0) ? 0 : 1]
                                                  .effects,
                                              0, 38.0f * sInvWaterSpeedFactor, 26.0f * sInvWaterSpeedFactor,
@@ -5458,12 +6555,11 @@ s32 Player_ActionHandler_1(Player* this, PlayState* play) {
             }
 
             if ((this->doorType != PLAYER_DOORTYPE_FAKE) && (doorActor->category == ACTORCAT_DOOR)) {
-                frontRoom = play->transiActorCtx.list[GET_TRANSITION_ACTOR_INDEX(doorActor)]
-                                .sides[(doorDirection > 0) ? 0 : 1]
-                                .room;
+                frontRoom =
+                    play->transiActorCtx.list[(u16)doorActor->params >> 10].sides[(doorDirection > 0) ? 0 : 1].room;
 
                 if ((frontRoom >= 0) && (frontRoom != play->roomCtx.curRoom.num)) {
-                    Room_RequestNewRoom(play, &play->roomCtx, frontRoom);
+                    func_8009728C(play, &play->roomCtx, frontRoom);
                 }
             }
 
@@ -5552,7 +6648,7 @@ void func_8083A0F4(PlayState* play, Player* this) {
 
         if (interactActorId == ACTOR_BG_TOKI_SWD) {
             this->interactRangeActor->parent = &this->actor;
-            Player_SetupAction(play, this, Player_Action_WaitForCutscene, 0);
+            Player_SetupAction(play, this, Player_Action_8084F608, 0);
             this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE;
             if (!CVarGetInteger(CVAR_ENHANCEMENT("PersistentMasks"), 0) ||
                 !CVarGetInteger(CVAR_ENHANCEMENT("AdultMasks"), 0)) {
@@ -5565,7 +6661,7 @@ void func_8083A0F4(PlayState* play, Player* this) {
                 Player_SetupAction(play, this, Player_Action_80846120, 0);
                 this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE;
                 anim = &gPlayerAnim_link_normal_heavy_carry;
-            } else if ((interactActorId == ACTOR_EN_ISHI) && (PARAMS_GET_U(interactRangeActor->params, 0, 4) == 1)) {
+            } else if ((interactActorId == ACTOR_EN_ISHI) && ((interactRangeActor->params & 0xF) == 1)) {
                 Player_SetupAction(play, this, Player_Action_80846260, 0);
                 anim = &gPlayerAnim_link_silver_carry;
             } else if (GameInteractor_Should(VB_PREVENT_STRENGTH, ((interactActorId == ACTOR_EN_BOMBF) ||
@@ -5642,6 +6738,23 @@ void func_8083A434(PlayState* play, Player* this) {
     }
 }
 
+// FD (2026-07-15): "MM Flips & Jump Physics" (Bonus Settings) per-form gate. Dropdown: 0 Off / 1 Child /
+// 2 Child+Adult / 3 Fierce Deity / 4 All. Returns true when the current form should use MM's flip run-jump.
+static s32 MmFlips_FormGatedOn(void) {
+    switch (CVarGetInteger(CVAR_ENHANCEMENT("BonusSettings.MmFlips"), 0)) {
+        case 1:
+            return gSaveContext.linkAge == LINK_AGE_CHILD;
+        case 2:
+            return (gSaveContext.linkAge == LINK_AGE_CHILD) || (gSaveContext.linkAge == LINK_AGE_ADULT);
+        case 3:
+            return gSaveContext.linkAge == LINK_AGE_DEITY;
+        case 4:
+            return true;
+        default:
+            return false;
+    }
+}
+
 s32 func_8083A4A8(Player* this, PlayState* play) {
     s16 yawDiff;
     LinkAnimationHeader* anim;
@@ -5651,6 +6764,27 @@ s32 func_8083A4A8(Player* this, PlayState* play) {
 
     if ((ABS(yawDiff) < 0x1000) && (this->linearVelocity > 4.0f)) {
         anim = &gPlayerAnim_link_normal_run_jump;
+        // FD (2026-07-15): MM Flips -- for a gated form, roll MM's 3-jump pool each running jump: the regular OoT
+        // jump (kept, same as MM's), the front-flip, or the somersault (~1/3 each, matching the MM_Jumps addon's
+        // pool that includes the vanilla jump). The landing switch below (~"skelAnime.animation ==") pairs the
+        // matching MM landing; the regular jump keeps the vanilla landing. Pure animation swap (no physics change),
+        // so the temp/velocity math and the vanilla jump for non-gated forms are untouched.
+        if (MmFlips_FormGatedOn()) {
+            f32 mmRoll = Rand_ZeroOne();
+            if (mmRoll < (1.0f / 3.0f)) {
+                // regular OoT run-jump: leave `anim` as gPlayerAnim_link_normal_run_jump
+            } else if (mmRoll < (2.0f / 3.0f)) {
+                anim = (LinkAnimationHeader*)gPlayerAnim_mmjumps_front_flip_jump;
+                // FD (2026-07-15): the MM_Jumps addon accompanies the FRONT-FLIP with the roll "whoosh"
+                // (NA_SE_PL_ROLL) ~1 frame after it starts (MM_Jumps.ts:320-324; toggleable, default on). That
+                // sfx already exists in OoT, so no custom sample/WAV is needed -- just play it at the flip's start
+                // (alongside the jump grunt func_80838940 fires below, exactly as the addon does). The somersault
+                // has no whoosh in the source, so it stays silent.
+                Player_PlaySfx(this, NA_SE_PL_ROLL);
+            } else {
+                anim = (LinkAnimationHeader*)gPlayerAnim_mmjumps_somersault_jump;
+            }
+        }
     } else {
         anim = &gPlayerAnim_link_normal_jump;
     }
@@ -5710,7 +6844,7 @@ s32 func_8083A6AC(Player* this, PlayState* play) {
 
         if (BgCheck_EntityLineTest1(&play->colCtx, &this->actor.world.pos, &sp74, &sp68, &sp84, true, false, false,
                                     true, &sp80) &&
-            GameInteractor_Should(VB_SURFACE_ANGLE_IS_CLIMBABLE, ABS(sp84->normal.y) < 600)) {
+            ((ABS(sp84->normal.y) < 600) || (CVarGetInteger(CVAR_CHEAT("ClimbEverything"), 0) != 0))) {
             f32 nx = COLPOLY_GET_NORMAL(sp84->normal.x);
             f32 ny = COLPOLY_GET_NORMAL(sp84->normal.y);
             f32 nz = COLPOLY_GET_NORMAL(sp84->normal.z);
@@ -5771,7 +6905,7 @@ void func_8083AA10(Player* this, PlayState* play) {
     this->fallDistance = this->fallStartHeight - (s32)this->actor.world.pos.y;
 
     if (!(this->stateFlags1 & (PLAYER_STATE1_IN_WATER | PLAYER_STATE1_IN_CUTSCENE)) &&
-        !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+        !(this->actor.bgCheckFlags & 1)) {
         if (!func_80838FB8(play, this)) {
             if (sPrevFloorProperty == 8) {
                 this->actor.world.pos.x = this->actor.prevPos.x;
@@ -5804,10 +6938,9 @@ void func_8083AA10(Player* this, PlayState* play) {
 
                 this->floorSfxOffset = this->prevFloorSfxOffset;
 
-                if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND_LEAVE) &&
-                    !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) && (sPrevFloorProperty != 6) &&
-                    (sPrevFloorProperty != 9) && (sYDistToFloor > 20.0f) && (this->meleeWeaponState == 0) &&
-                    (ABS(sp5C) < 0x2000) && (this->linearVelocity > 3.0f)) {
+                if ((this->actor.bgCheckFlags & 4) && !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) &&
+                    (sPrevFloorProperty != 6) && (sPrevFloorProperty != 9) && (sYDistToFloor > 20.0f) &&
+                    (this->meleeWeaponState == 0) && (ABS(sp5C) < 0x2000) && (this->linearVelocity > 3.0f)) {
 
                     if ((sPrevFloorProperty == 11) && !(this->stateFlags1 & PLAYER_STATE1_CARRYING_ACTOR)) {
 
@@ -5817,7 +6950,6 @@ void func_8083AA10(Player* this, PlayState* play) {
                         if (WaterBox_GetSurface1(play, &play->colCtx, sp44.x, sp44.z, &sp3C, &sp50) &&
                             ((sp3C - sp40) > 50.0f)) {
                             func_808389E8(this, &gPlayerAnim_link_normal_run_jump_water_fall, 6.0f, play);
-                            GameInteractor_Should(VB_PLAYER_LIMIT_DIVE_XZ_SPEED, true, this);
                             Player_SetupAction(play, this, Player_Action_80844A44, 0);
                             return;
                         }
@@ -5839,33 +6971,33 @@ void func_8083AA10(Player* this, PlayState* play) {
     }
 }
 
-/**
- * Sets camera mode for first person, depending on what weapon is held if any.
- * (This causes the "flickering" with action swap with ranged items, as player
- * cannot be first person with a non-ranged weapon.)
- * @return new camera mode, `CAM_MODE_NORMAL` if failed
- */
 s32 func_8083AD4C(PlayState* play, Player* this) {
     s32 camMode;
 
     if (this->unk_6AD == 2) {
         if (func_8002DD6C(this)) {
-            if (LINK_IS_ADULT) {
-                camMode = CAM_MODE_AIM_ADULT;
-            } else {
-                camMode = CAM_MODE_AIM_CHILD;
+            bool shouldUseBowCamera = LINK_IS_ADULT;
+
+            if (CVarGetInteger(CVAR_ENHANCEMENT("BowSlingshotAmmoFix"), 0) ||
+                CVarGetInteger(CVAR_ENHANCEMENT("EquipmentAlwaysVisible"), 0)) {
+                shouldUseBowCamera = this->heldItemAction != PLAYER_IA_SLINGSHOT;
             }
+
+            camMode = shouldUseBowCamera ? CAM_MODE_BOWARROW : CAM_MODE_SLINGSHOT;
         } else {
-            camMode = CAM_MODE_AIM_BOOMERANG;
+            // #region SOH [Enhancement]
+            if (CVarGetInteger(CVAR_ENHANCEMENT("BoomerangFirstPerson"), 0)) {
+                camMode = CAM_MODE_FIRSTPERSON;
+                // #endregion
+            } else {
+                camMode = CAM_MODE_BOOMERANG;
+            }
         }
     } else {
-        camMode = CAM_MODE_FIRST_PERSON;
+        camMode = CAM_MODE_FIRSTPERSON;
     }
 
-    // Check if aiming camera mode should be overridden due to player settings
-    GameInteractor_Should(VB_CHANGE_AIMING_CAMERA, true, &this->heldItemAction, &camMode);
-
-    return Camera_ChangeMode(Play_GetCamera(play, CAM_ID_MAIN), camMode);
+    return Camera_ChangeMode(Play_GetCamera(play, 0), camMode);
 }
 
 /**
@@ -5933,9 +7065,9 @@ void func_8083AF44(PlayState* play, Player* this, s32 magicSpell) {
     }
 
     if (magicSpell == 5) {
-        this->subCamId = OnePointCutscene_Init(play, 1100, -101, NULL, CAM_ID_MAIN);
+        this->subCamId = OnePointCutscene_Init(play, 1100, -101, NULL, MAIN_CAM);
     } else {
-        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_10);
+        func_80835EA4(play, 10);
     }
 }
 
@@ -5990,8 +7122,8 @@ s32 Player_ActionHandler_13(Player* this, PlayState* play) {
     GetItemEntry giEntry;
     Actor* talkActor;
 
-    if ((this->unk_6AD != 0) && (func_808332B8(this) || (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
-                                 (this->stateFlags1 & PLAYER_STATE1_ON_HORSE))) {
+    if ((this->unk_6AD != 0) &&
+        (func_808332B8(this) || (this->actor.bgCheckFlags & 1) || (this->stateFlags1 & PLAYER_STATE1_ON_HORSE))) {
 
         if (!Player_StartCsAction(play, this)) {
             if (this->unk_6AD == 4) {
@@ -6003,7 +7135,7 @@ s32 Player_ActionHandler_13(Player* this, PlayState* play) {
                         Player_SetupAction(play, this, Player_Action_8085063C, 1);
                         this->stateFlags1 |= PLAYER_STATE1_IN_ITEM_CS | PLAYER_STATE1_IN_CUTSCENE;
                         Player_AnimPlayOnce(play, this, Player_GetIdleAnim(this));
-                        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_4);
+                        func_80835EA4(play, 4);
                     }
 
                     func_80832224(this);
@@ -6063,11 +7195,11 @@ s32 Player_ActionHandler_13(Player* this, PlayState* play) {
                         } else if (sp2C == EXCH_ITEM_LETTER_RUTO) {
                             this->av1.actionVar1 = 1;
                             this->actor.textId = 0x4005;
-                            Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_1);
+                            func_80835EA4(play, 1);
                         } else {
                             this->av1.actionVar1 = 2;
                             this->actor.textId = 0xCF;
-                            Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_4);
+                            func_80835EA4(play, 4);
                         }
 
                         this->actor.flags |= ACTOR_FLAG_TALK;
@@ -6090,21 +7222,21 @@ s32 Player_ActionHandler_13(Player* this, PlayState* play) {
                     if (sp2C == 0xC) {
                         Player_SetupActionPreserveItemAction(play, this, Player_Action_8084EED8, 0);
                         Player_AnimPlayOnceAdjusted(play, this, &gPlayerAnim_link_bottle_bug_out);
-                        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_3);
+                        func_80835EA4(play, 3);
                     } else if ((sp2C > 0) && (sp2C < 4)) {
                         Player_SetupActionPreserveItemAction(play, this, Player_Action_8084EFC0, 0);
                         Player_AnimPlayOnceAdjusted(play, this, &gPlayerAnim_link_bottle_fish_out);
-                        Player_SetTurnAroundCamera(play, (sp2C == 1) ? CAM_ITEM_TYPE_1 : CAM_ITEM_TYPE_5);
+                        func_80835EA4(play, (sp2C == 1) ? 1 : 5);
                     } else {
                         Player_SetupActionPreserveItemAction(play, this, Player_Action_8084EAC0, 0);
                         Player_AnimChangeOnceMorphAdjusted(play, this, &gPlayerAnim_link_bottle_drink_demo_start);
-                        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_2);
+                        func_80835EA4(play, 2);
                     }
                 } else {
                     Player_SetupActionPreserveItemAction(play, this, Player_Action_8084E3C4, 0);
                     Player_AnimPlayOnceAdjusted(play, this, &gPlayerAnim_link_normal_okarina_start);
                     this->stateFlags2 |= PLAYER_STATE2_OCARINA_PLAYING;
-                    Player_SetTurnAroundCamera(play, (this->unk_6A8 != NULL) ? CAM_ITEM_TYPE_91 : CAM_ITEM_TYPE_90);
+                    func_80835EA4(play, (this->unk_6A8 != NULL) ? 0x5B : 0x5A);
                     if (this->unk_6A8 != NULL) {
                         this->stateFlags2 |= PLAYER_STATE2_PLAY_FOR_ACTOR;
                         Camera_SetParam(Play_GetCamera(play, 0), 8, this->unk_6A8);
@@ -6174,7 +7306,7 @@ s32 Player_ActionHandler_Talk(Player* this, PlayState* play) {
                 ((this->heldActor != NULL) &&
                  (forceTalkToNavi || (talkOfferActor == this->heldActor) || (cUpTalkActor == this->heldActor) ||
                   ((talkOfferActor != NULL) && (talkOfferActor->flags & ACTOR_FLAG_TALK_OFFER_AUTO_ACCEPTED))))) {
-                if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) || (this->stateFlags1 & PLAYER_STATE1_ON_HORSE) ||
+                if ((this->actor.bgCheckFlags & 1) || (this->stateFlags1 & PLAYER_STATE1_ON_HORSE) ||
                     (func_808332B8(this) && !(this->stateFlags2 & PLAYER_STATE2_UNDERWATER))) {
 
                     if (talkOfferActor != NULL) {
@@ -6234,7 +7366,7 @@ s32 Player_ActionHandler_Talk(Player* this, PlayState* play) {
 s32 func_8083B8F4(Player* this, PlayState* play) {
     if (!(this->stateFlags1 & (PLAYER_STATE1_CARRYING_ACTOR | PLAYER_STATE1_ON_HORSE)) &&
         Camera_CheckValidMode(Play_GetCamera(play, 0), 6)) {
-        if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
+        if ((this->actor.bgCheckFlags & 1) ||
             (func_808332B8(this) && (this->actor.yDistToWater < this->ageProperties->unk_2C))) {
             this->unk_6AD = 1;
             return 1;
@@ -6340,7 +7472,7 @@ s32 Player_ActionHandler_10(Player* this, PlayState* play) {
 
     if (CHECK_BTN_ALL(sControlInput->press.button, BTN_A) &&
         (play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_2) && (sFloorType != 7) &&
-        (SurfaceType_GetFloorEffect(&play->colCtx, this->actor.floorPoly, this->actor.floorBgId) != 1)) {
+        (SurfaceType_GetSlope(&play->colCtx, this->actor.floorPoly, this->actor.floorBgId) != 1)) {
         controlStickDirection = this->controlStickDirections[this->controlStickDataIndex];
 
         if (controlStickDirection <= PLAYER_STICK_DIR_FORWARD) {
@@ -6451,7 +7583,15 @@ s32 Player_ActionHandler_Roll(Player* this, PlayState* play) {
         CHECK_BTN_ALL(sControlInput->press.button, BTN_A)) {
         if (Player_TryRoll(this, play)) {
             return true;
-        } else if ((this->putAwayCooldownTimer == 0) && (this->heldItemAction >= PLAYER_IA_SWORD_MASTER)) {
+        } else if ((this->putAwayCooldownTimer == 0) && (this->heldItemAction >= PLAYER_IA_SWORD_MASTER) &&
+                   // FD (2026-07-11) bug 3: the Fierce Deity sword is normally always drawn and cannot be sheathed
+                   // (RE z_player.c:7706, func_8083C1DC gates this A-press put-away on !LINK_IS_DEITY).
+                   // FD (2026-07-12) bug 13: the gate MUST be in this condition, not the body -- FD's
+                   // heldItemAction is always >= PLAYER_IA_SWORD_MASTER (ITEM_SWORD_DEITY -> IA_SWORD_BIGGORON,
+                   // re-forced every frame), so keeping FD out of this branch lets the idle A-press fall through
+                   // to the Navi in/out-of-hat toggle below, exactly as it does for child/adult Link.
+                   // FD (2026-07-12) #5: the "FD Can Sheathe Sword" cvar (2ship parity) lets FD sheathe like Link.
+                   (!LINK_IS_DEITY || CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdCanSheathe"), 0))) {
             Player_UseItem(play, this, ITEM_NONE);
         } else {
             this->stateFlags2 ^= PLAYER_STATE2_NAVI_ACTIVE;
@@ -6467,8 +7607,12 @@ s32 Player_ActionHandler_11(Player* this, PlayState* play) {
 
     if ((play->shootingGalleryStatus == 0) && (this->currentShield != PLAYER_SHIELD_NONE) &&
         CHECK_BTN_ALL(sControlInput->cur.button, BTN_R) &&
+        // FD (2026-07-11) bug 4: the Fierce Deity never crouch-guards (RE z_player.c:7723 gates the crouch on
+        // !LINK_IS_DEITY). FD guards with the STANDING brace (func_80834758, entered via LINK_IS_DEITY) instead.
+        // (Belt-and-suspenders: Player_SetEquipmentData also forces currentShield==NONE for FD, so the outer
+        // shield check already fails; this gate matches the RE and stays correct even if a shield leaks through.)
         (Player_IsChildWithHylianShield(this) ||
-         (!Player_FriendlyLockOnOrParallel(this) && (this->focusActor == NULL)))) {
+         (!Player_FriendlyLockOnOrParallel(this) && (this->focusActor == NULL) && !LINK_IS_DEITY))) {
 
         func_80832318(this);
         Player_DetachHeldActor(play, this);
@@ -6534,9 +7678,30 @@ void func_8083C50C(Player* this) {
 
 s32 Player_ActionHandler_8(Player* this, PlayState* play) {
     if (CHECK_BTN_ALL(sControlInput->cur.button, BTN_B)) {
-        if (!(this->stateFlags1 & PLAYER_STATE1_SHIELDING) && (Player_GetMeleeWeaponHeld(this) != 0) &&
-            (this->unk_844 == 1) && (this->heldItemAction != PLAYER_IA_DEKU_STICK)) {
-            if ((this->heldItemAction != PLAYER_IA_SWORD_BIGGORON) || (gSaveContext.swordHealth > 0.0f)) {
+        // FD (2026-07-11) bug 1: the Fierce Deity sword fires its magic BEAM on a normal swing
+        // (Player_ActionHandler_7, which drains 1 via MAGIC_CONSUME_DEITY_BEAM and spawns EN_M_THUNDER with the
+        // 0x200 beam bit) and does NOT do the OoT B-hold spin-attack charge. This handler is the B-hold charge
+        // entry (-> func_808377DC -> Player_Action_80844E68, the charge/spin state that reserves + drains magic
+        // for the spin -- the "spin-charge magic" the player saw). Gating it on !LINK_IS_DEITY makes B-hold do
+        // NOTHING for FD, while the swing-beam path (a SEPARATE handler, checked alongside this one in the action
+        // lists) is untouched -- and func_80837704's charge-glow spawn is a different call from the swing beam,
+        // so the beam still fires. func_8083C50C counter bookkeeping in the else is left intact.
+        // FD (2026-07-12): the earlier !LINK_IS_DEITY gate here was a REGRESSION -- it blocked FD from even
+        // ENTERING the B-hold charge/spin state (func_808377DC), so FD couldn't press-and-hold B at all. The RE
+        // (fd_build func_8083C544:7810) does NOT gate the handler entry; FD charges/spins normally. The OoT
+        // spin-charge GLOW + magic drain is suppressed separately by the !LINK_IS_DEITY gate around the
+        // charge-glow En_M_Thunder spawn in func_80837704 (z_player.c:5153) -- that alone gives MM parity
+        // (FD charges/spins, no glow, no magic cost). So the handler-entry gate is removed to match the RE.
+        if (!(this->stateFlags1 & PLAYER_STATE1_SHIELDING) &&
+            (Player_GetMeleeWeaponHeld(this) != 0) && (this->unk_844 == 1) &&
+            (this->heldItemAction != PLAYER_IA_DEKU_STICK)) {
+            // FD (2026-07-12) ★#6 hold-B STANCE FIX: FD's sword maps to the PLAYER_IA_SWORD_BIGGORON action, so this
+            // Biggoron durability gate (swordHealth > 0) blocked the B-hold charge entirely for FD (his swordHealth
+            // is 0 -- he doesn't own the real Biggoron sword). That is why "hold B does nothing" for FD. The FD sword
+            // is not the Biggoron sword; exempt the deity form from the durability check so the magicless stance/charge
+            // works (the magic disk is still suppressed in func_80837704 unless the FdMagicSpin cheat is on).
+            if ((this->heldItemAction != PLAYER_IA_SWORD_BIGGORON) || (gSaveContext.swordHealth > 0.0f) ||
+                LINK_IS_DEITY) {
                 func_808377DC(play, this);
                 return 1;
             }
@@ -6549,8 +7714,8 @@ s32 Player_ActionHandler_8(Player* this, PlayState* play) {
 }
 
 s32 func_8083C61C(PlayState* play, Player* this) {
-    if ((play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_2) &&
-        (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && (AMMO(ITEM_NUT) != 0)) {
+    if ((play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_2) && (this->actor.bgCheckFlags & 1) &&
+        (AMMO(ITEM_NUT) != 0)) {
         Player_SetupAction(play, this, Player_Action_8084E604, 0);
         Player_AnimPlayOnce(play, this, &gPlayerAnim_link_normal_light_bom);
         this->unk_6AD = 0;
@@ -6595,7 +7760,7 @@ s32 func_8083C6B8(PlayState* play, Player* this) {
 
             if (CVarGetInteger(CVAR_ENHANCEMENT("HoverFishing"), 0)
                     ? 0
-                    : !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) || (this->actor.world.pos.z > 1300.0f) ||
+                    : !(this->actor.bgCheckFlags & 1) || (this->actor.world.pos.z > 1300.0f) ||
                           BgCheck_SphVsFirstPoly(&play->colCtx, &rodCheckPos, 20.0f)) {
                 Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
                 return 0;
@@ -6635,35 +7800,32 @@ void func_8083C8DC(Player* this, PlayState* play, s16 arg2) {
     func_8083C858(this, play);
 }
 
-/**
- * @return false if player starting movement is swimming, otherwise true
- */
-s32 Player_SetStartingMovement(PlayState* play, Player* this, f32 arg2) {
-    WaterBox* waterbox;
-    f32 ySurface;
+s32 func_8083C910(PlayState* play, Player* this, f32 arg2) {
+    WaterBox* sp2C;
+    f32 sp28;
 
-    ySurface = this->actor.world.pos.y;
-    if (WaterBox_GetSurface1(play, &play->colCtx, this->actor.world.pos.x, this->actor.world.pos.z, &ySurface,
-                             &waterbox)) {
-        ySurface -= this->actor.world.pos.y;
-        if (GameInteractor_Should(VB_PLAYER_SPAWN_SWIMMING, this->ageProperties->unk_24 <= ySurface, this)) {
+    sp28 = this->actor.world.pos.y;
+    if (WaterBox_GetSurface1(play, &play->colCtx, this->actor.world.pos.x, this->actor.world.pos.z, &sp28, &sp2C) !=
+        0) {
+        sp28 -= this->actor.world.pos.y;
+        if (this->ageProperties->unk_24 <= sp28) {
             Player_SetupAction(play, this, Player_Action_8084D7C4, 0);
             Player_AnimChangeLoopSlowMorph(play, this, &gPlayerAnim_link_swimer_swim);
             this->stateFlags1 |= PLAYER_STATE1_IN_WATER | PLAYER_STATE1_IN_CUTSCENE;
             this->av2.actionVar2 = 20;
             this->linearVelocity = 2.0f;
             Player_SetBootData(play, this);
-            return false;
+            return 0;
         }
     }
 
     func_80838E70(play, this, arg2, this->actor.shape.rot.y);
     this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE;
-    return true;
+    return 1;
 }
 
 void Player_StartMode_Idle(PlayState* play, Player* this) {
-    if (Player_SetStartingMovement(play, this, 180.0f)) {
+    if (func_8083C910(play, this, 180.0f)) {
         this->av2.actionVar2 = -20;
     }
 }
@@ -6671,7 +7833,7 @@ void Player_StartMode_Idle(PlayState* play, Player* this) {
 void Player_StartMode_MoveForwardSlow(PlayState* play, Player* this) {
     this->linearVelocity = 2.0f;
     gSaveContext.entranceSpeed = 2.0f;
-    if (Player_SetStartingMovement(play, this, 120.0f)) {
+    if (func_8083C910(play, this, 120.0f)) {
         this->av2.actionVar2 = -15;
     }
 }
@@ -6683,7 +7845,7 @@ void Player_StartMode_MoveForward(PlayState* play, Player* this) {
 
     this->linearVelocity = gSaveContext.entranceSpeed;
 
-    if (Player_SetStartingMovement(play, this, 800.0f)) {
+    if (func_8083C910(play, this, 800.0f)) {
         this->av2.actionVar2 = -80 / this->linearVelocity;
         if (this->av2.actionVar2 < -20) {
             this->av2.actionVar2 = -20;
@@ -6879,7 +8041,7 @@ void func_8083D330(PlayState* play, Player* this) {
 }
 
 void func_8083D36C(PlayState* play, Player* this) {
-    if ((this->currentBoots != PLAYER_BOOTS_IRON) || !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+    if ((this->currentBoots != PLAYER_BOOTS_IRON) || !(this->actor.bgCheckFlags & 1)) {
         func_80832564(play, this);
 
         if ((this->currentBoots != PLAYER_BOOTS_IRON) && (this->stateFlags2 & PLAYER_STATE2_UNDERWATER)) {
@@ -6892,9 +8054,8 @@ void func_8083D36C(PlayState* play, Player* this) {
         } else {
             Player_SetupAction(play, this, Player_Action_8084D610, 1);
             Player_AnimChangeOnceMorph(play, this,
-                                       (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)
-                                           ? &gPlayerAnim_link_swimer_wait2swim_wait
-                                           : &gPlayerAnim_link_swimer_land2swim_wait);
+                                       (this->actor.bgCheckFlags & 1) ? &gPlayerAnim_link_swimer_wait2swim_wait
+                                                                      : &gPlayerAnim_link_swimer_land2swim_wait);
         }
     }
 
@@ -6930,7 +8091,7 @@ void func_8083D53C(PlayState* play, Player* this) {
     if ((Player_Action_80845668 != this->actionFunc) && (Player_Action_8084BDFC != this->actionFunc)) {
         if (this->ageProperties->unk_2C < this->actor.yDistToWater) {
             if (!(this->stateFlags1 & PLAYER_STATE1_IN_WATER) ||
-                (!((this->currentBoots == PLAYER_BOOTS_IRON) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) &&
+                (!((this->currentBoots == PLAYER_BOOTS_IRON) && (this->actor.bgCheckFlags & 1)) &&
                  (Player_Action_8084E30C != this->actionFunc) && (Player_Action_8084E368 != this->actionFunc) &&
                  (Player_Action_8084D610 != this->actionFunc) && (Player_Action_8084D84C != this->actionFunc) &&
                  (Player_Action_8084DAB4 != this->actionFunc) && (Player_Action_8084DC48 != this->actionFunc) &&
@@ -7029,7 +8190,7 @@ void func_8083D6EC(PlayState* play, Player* this) {
             s32 numBubbles = 0;
             s32 i;
 
-            if ((this->actor.velocity.y > -1.0f) || (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+            if ((this->actor.velocity.y > -1.0f) || (this->actor.bgCheckFlags & 1)) {
                 if (Rand_ZeroOne() < 0.2f) {
                     numBubbles = 1;
                 }
@@ -7129,10 +8290,29 @@ void func_8083DFE0(Player* this, f32* arg1, s16* arg2) {
     s16 yawDiff = this->yaw - *arg2;
 
     if (this->meleeWeaponState == 0) {
-        if (GameInteractor_Should(VB_PLAYER_LIMIT_JUMP_SPEED, true, this)) {
-            this->linearVelocity =
-                CLAMP(this->linearVelocity, -(R_RUN_SPEED_LIMIT / 100.0f), (R_RUN_SPEED_LIMIT / 100.0f));
+        float maxSpeed = R_RUN_SPEED_LIMIT / 100.0f;
+
+        if (CVarGetInteger(CVAR_ENHANCEMENT("MMBunnyHood"), BUNNY_HOOD_VANILLA) == BUNNY_HOOD_FAST_AND_JUMP &&
+            this->currentMask == PLAYER_MASK_BUNNY) {
+            maxSpeed *= 1.5f;
         }
+
+        if (CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f) != 1.0f &&
+            !CVarGetInteger(CVAR_CHEAT("SpeedModifier.DoesntChangeJump"), 0)) {
+            if (CVarGetInteger(CVAR_CHEAT("SpeedModifier.SpeedToggle"), 0)) {
+                if (gWalkSpeedToggle) {
+                    maxSpeed *= CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f);
+                }
+            } else {
+                const s32 mod1Mask = CVarGetInteger(CVAR_CHEAT("SpeedModifier.Btn"), BTN_CUSTOM_MODIFIER1);
+
+                if (mod1Mask != 0 && CHECK_BTN_ALL(sControlInput->cur.button, mod1Mask)) {
+                    maxSpeed *= CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f);
+                }
+            }
+        }
+
+        this->linearVelocity = CLAMP(this->linearVelocity, -maxSpeed, maxSpeed);
     }
 
     if (ABS(yawDiff) > 0x6000) {
@@ -7159,6 +8339,13 @@ s32 Player_ActionHandler_3(Player* this, PlayState* play) {
     s32 temp;
 
     if ((rideActor != NULL) && CHECK_BTN_ALL(sControlInput->press.button, BTN_A)) {
+        // FD (2026-07-12) #8: a transformed form can't ride Epona (RE fd_build z_player.c:8419). Navi says
+        // "You're too big!!" (RE text 0x71B3 = TEXT_TRANSFORM_TOO_BIG). On by default; cheat-togglable.
+        if (LINK_IS_DEITY && CVarGetInteger(CVAR_CHEAT("TransformationMasks.PreventRestrictedActions"), 1)) {
+            Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
+            this->naviTextId = -0x71B3; // negative = force Navi to talk this textId
+            return 0;
+        }
         sp38 = Math_CosS(rideActor->actor.shape.rot.y);
         sp34 = Math_SinS(rideActor->actor.shape.rot.y);
 
@@ -7217,7 +8404,7 @@ s32 Player_HandleSlopes(PlayState* play, Player* this, CollisionPoly* floorPoly)
     s16 velYawToDownwardSlope;
 
     if (!Player_InBlockingCsMode(play, this) && (Player_Action_SlideOnSlope != this->actionFunc) &&
-        (SurfaceType_GetFloorEffect(&play->colCtx, floorPoly, this->actor.floorBgId) == 1)) {
+        (SurfaceType_GetSlope(&play->colCtx, floorPoly, this->actor.floorBgId) == 1)) {
         // Get direction of movement relative to the downward direction of the slope
         playerVelYaw = Math_Atan2S(this->actor.velocity.z, this->actor.velocity.x);
         Player_GetSlopeDirection(floorPoly, &slopeNormal, &downwardSlopeYaw);
@@ -7284,7 +8471,7 @@ s32 Player_ActionHandler_2(Player* this, PlayState* play) {
     }
 
     if (iREG(67) ||
-        (((interactedActor = this->interactRangeActor) != NULL) && TitleCard_Clear(play, &play->actorCtx.titleCtx))) {
+        (((interactedActor = this->interactRangeActor) != NULL) && func_8002D53C(play, &play->actorCtx.titleCtx))) {
         if (iREG(67) || (this->getItemId > GI_NONE)) {
             if (iREG(67)) {
                 this->getItemId = iREG(68);
@@ -7318,6 +8505,14 @@ s32 Player_ActionHandler_2(Player* this, PlayState* play) {
                 // randomized and thus it's important to keep showing the cutscene.
                 uint8_t showItemCutscene = play->sceneNum == SCENE_BOMBCHU_BOWLING_ALLEY || IS_RANDO ||
                                            giEntry.modIndex == MOD_RANDOMIZER ||
+                                           // FD (2026-07-12) #3: ALWAYS play the full overhead-hold get sequence
+                                           // (+ custom fanfare) for the Fierce Deity's Mask. Otherwise, once you
+                                           // already own it, Item_CheckObtainability != ITEM_NONE makes this false
+                                           // -> the quick-give path (func_8083E4C4) fires with just the generic
+                                           // item chime and no fanfare (the reported "small get as if I already
+                                           // had it" bug; testing re-grants an owned mask). It's a unique item, so
+                                           // forcing the full sequence is always correct.
+                                           giEntry.itemId == ITEM_MASK_DEITY ||
                                            Item_CheckObtainability(giEntry.itemId) == ITEM_NONE;
 
                 // Only skip cutscenes for drops when they're items/consumables from bushes/rocks/enemies.
@@ -7349,7 +8544,7 @@ s32 Player_ActionHandler_2(Player* this, PlayState* play) {
                     if (!(this->stateFlags2 & PLAYER_STATE2_UNDERWATER) || (this->currentBoots == PLAYER_BOOTS_IRON)) {
                         Player_SetupWaitForPutAway(play, this, func_8083A434);
                         Player_AnimPlayOnceAdjusted(play, this, &gPlayerAnim_link_demo_get_itemB);
-                        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_9);
+                        func_80835EA4(play, 9);
                     }
 
                     this->stateFlags1 |=
@@ -7404,7 +8599,7 @@ s32 Player_ActionHandler_2(Player* this, PlayState* play) {
                         Player_AnimPlayOnceAdjusted(play, this, this->ageProperties->unk_98);
                         Player_StartAnimMovement(play, this, 0x28F);
                         chest->unk_1F4 = 1;
-                        Camera_RequestSetting(Play_GetCamera(play, 0), CAM_SET_SLOW_CHEST_CS);
+                        Camera_ChangeSetting(Play_GetCamera(play, 0), CAM_SET_SLOW_CHEST_CS);
                     } else {
                         Player_AnimPlayOnce(play, this, &gPlayerAnim_link_normal_box_kick);
                         chest->unk_1F4 = -1;
@@ -7415,6 +8610,17 @@ s32 Player_ActionHandler_2(Player* this, PlayState* play) {
             }
 
             if ((this->heldActor == NULL) || Player_HoldsHookshot(this)) {
+                // FD (2026-07-12) #8: a transformed form can't draw/place the Master Sword at the Temple of Time
+                // pedestal (RE fd_build z_player.c:8636). Navi says "You can't do that in your current form!"
+                // (RE text 0x71B4 = TEXT_TRANSFORM_CANT_DO_THAT). On by default; cheat-togglable. (Vanilla's
+                // VB check below is already false for a non-adult form, so it would otherwise fall through to
+                // trying to LIFT the pedestal -- this pre-check blocks that and shows the message.)
+                if ((interactedActor->id == ACTOR_BG_TOKI_SWD) && LINK_IS_DEITY &&
+                    CVarGetInteger(CVAR_CHEAT("TransformationMasks.PreventRestrictedActions"), 1)) {
+                    Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
+                    this->naviTextId = -0x71B4;
+                    return 0;
+                }
                 if (GameInteractor_Should(VB_SHOW_MASTER_SWORD_TO_PLACE_IN_PEDESTAL,
                                           (interactedActor->id == ACTOR_BG_TOKI_SWD) && LINK_IS_ADULT)) {
                     s32 sp24 = this->itemAction;
@@ -7562,7 +8768,7 @@ s32 func_8083EC18(Player* this, PlayState* play, u32 wallFlags) {
 
                     if ((sp8C != 0) || (wallFlags & 2)) {
                         if ((this->av1.actionVar1 = sp8C) != 0) {
-                            if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+                            if (this->actor.bgCheckFlags & 1) {
                                 anim = &gPlayerAnim_link_normal_Fclimb_startA;
                             } else {
                                 anim = &gPlayerAnim_link_normal_Fclimb_hold2upL;
@@ -7614,7 +8820,11 @@ s32 Player_TryEnteringCrawlspace(Player* this, PlayState* play, u32 interactWall
     f32 zVertex2;
     s32 i;
 
-    if (!LINK_IS_ADULT && !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) && (interactWallFlags & 0x30)) {
+    // FD (2026-07-14): crawlspaces are CHILD-only. Vanilla OoT gated on `!LINK_IS_ADULT`, which is equivalent to
+    // "is child" only because vanilla has two ages; with the added LINK_AGE_DEITY (==2) that test is also true for
+    // Fierce Deity, so FD (adult-proportioned) was slipping through and crawling. Gate on LINK_IS_CHILD explicitly
+    // so DEITY is blocked exactly like adult, with no change for child.
+    if (LINK_IS_CHILD && !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) && (interactWallFlags & 0x30)) {
         if (!GameInteractor_Should(VB_CRAWL, true)) {
             return false;
         }
@@ -7741,7 +8951,7 @@ s32 func_8083F524(PlayState* play, Player* this) {
 s32 Player_TryLeavingCrawlspace(Player* this, PlayState* play) {
     s16 yawToWall;
 
-    if ((this->linearVelocity != 0.0f) && (this->actor.bgCheckFlags & BGCHECKFLAG_WALL) && (sTouchedWallFlags & 0x30)) {
+    if ((this->linearVelocity != 0.0f) && (this->actor.bgCheckFlags & 8) && (sTouchedWallFlags & 0x30)) {
 
         // The exit wallYaws will always point inward on the crawlline
         // Interacting with the exit wall in front will have a yaw diff of 0x8000
@@ -7760,7 +8970,7 @@ s32 Player_TryLeavingCrawlspace(Player* this, PlayState* play) {
                     this->actor.shape.rot.y = this->actor.wallYaw + 0x8000;
                     Player_AnimPlayOnce(play, this, &gPlayerAnim_link_child_tunnel_end);
                     Player_StartAnimMovement(play, this, 0x9D);
-                    OnePointCutscene_Init(play, 9601, 999, NULL, CAM_ID_MAIN);
+                    OnePointCutscene_Init(play, 9601, 999, NULL, MAIN_CAM);
                 } else {
                     // Leaving a crawlspace backwards
                     this->actor.shape.rot.y = this->actor.wallYaw;
@@ -7768,7 +8978,7 @@ s32 Player_TryLeavingCrawlspace(Player* this, PlayState* play) {
                                          Animation_GetLastFrame(&gPlayerAnim_link_child_tunnel_start), 0.0f,
                                          ANIMMODE_ONCE, 0.0f);
                     Player_StartAnimMovement(play, this, 0x9D);
-                    OnePointCutscene_Init(play, 9602, 999, NULL, CAM_ID_MAIN);
+                    OnePointCutscene_Init(play, 9602, 999, NULL, MAIN_CAM);
                 }
             }
 
@@ -7796,8 +9006,8 @@ void func_8083F72C(Player* this, LinkAnimationHeader* anim, PlayState* play) {
 s32 Player_ActionHandler_5(Player* this, PlayState* play) {
     DynaPolyActor* wallPolyActor;
 
-    if (!(this->stateFlags1 & PLAYER_STATE1_CARRYING_ACTOR) &&
-        (this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) && (sShapeYawToTouchedWall < 0x3000)) {
+    if (!(this->stateFlags1 & PLAYER_STATE1_CARRYING_ACTOR) && (this->actor.bgCheckFlags & 0x200) &&
+        (sShapeYawToTouchedWall < 0x3000)) {
 
         if (((this->linearVelocity > 0.0f) && func_8083EC18(this, play, sTouchedWallFlags)) ||
             Player_TryEnteringCrawlspace(this, play, sTouchedWallFlags)) {
@@ -7806,8 +9016,7 @@ s32 Player_ActionHandler_5(Player* this, PlayState* play) {
 
         if (!func_808332B8(this) &&
             ((this->linearVelocity == 0.0f) || !(this->stateFlags2 & PLAYER_STATE2_DO_ACTION_CLIMB)) &&
-            (sTouchedWallFlags & 0x40) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) &&
-            (this->yDistToLedge >= 39.0f)) {
+            (sTouchedWallFlags & 0x40) && (this->actor.bgCheckFlags & 1) && (this->yDistToLedge >= 39.0f)) {
 
             this->stateFlags2 |= PLAYER_STATE2_DO_ACTION_GRAB;
 
@@ -7848,7 +9057,7 @@ s32 Player_ActionHandler_5(Player* this, PlayState* play) {
 }
 
 s32 func_8083F9D0(PlayState* play, Player* this) {
-    if ((this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) &&
+    if ((this->actor.bgCheckFlags & 0x200) &&
         ((this->stateFlags2 & PLAYER_STATE2_MOVING_DYNAPOLY) || CHECK_BTN_ALL(sControlInput->cur.button, BTN_A))) {
         DynaPolyActor* wallPolyActor = NULL;
 
@@ -7890,8 +9099,7 @@ void func_8083FB7C(Player* this, PlayState* play) {
 }
 
 s32 func_8083FBC0(Player* this, PlayState* play) {
-    if (!CHECK_BTN_ALL(sControlInput->press.button, BTN_A) &&
-        (this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) &&
+    if (!CHECK_BTN_ALL(sControlInput->press.button, BTN_A) && (this->actor.bgCheckFlags & 0x200) &&
         ((sTouchedWallFlags & 8) || (sTouchedWallFlags & 2) ||
          func_80041E4C(&play->colCtx, this->actor.wallPoly, this->actor.wallBgId))) {
         return false;
@@ -8069,9 +9277,12 @@ void func_8084029C(Player* this, f32 arg1) {
         arg1 = 7.25f;
     }
 
-    if ((this->currentBoots == PLAYER_BOOTS_HOVER) && !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) &&
-        (this->hoverBootsTimer != 0)) {
-        Actor_PlaySfx_Flagged2(&this->actor, NA_SE_PL_HOBBERBOOTS_LV - SFX_FLAG);
+    if ((this->currentBoots == PLAYER_BOOTS_HOVER ||
+         (CVarGetInteger(CVAR_ENHANCEMENT("IvanCoopModeEnabled"), 0) && this->ivanFloating)) &&
+        !(this->actor.bgCheckFlags & 1) &&
+        (this->hoverBootsTimer != 0 ||
+         (CVarGetInteger(CVAR_ENHANCEMENT("IvanCoopModeEnabled"), 0) && this->ivanFloating))) {
+        func_8002F8F0(&this->actor, NA_SE_PL_HOBBERBOOTS_LV - SFX_FLAG);
     } else if (func_8084021C(this->unk_868, arg1, 29.0f, 10.0f) || func_8084021C(this->unk_868, arg1, 29.0f, 24.0f)) {
         Player_PlaySteppingSfx(this, this->linearVelocity);
         if (this->linearVelocity > 4.0f) {
@@ -8506,7 +9717,9 @@ void func_80841138(Player* this, PlayState* play) {
                 func_8084029C(this, (REG(35) / 1000.0f) + ((REG(36) / 1000.0f) * this->linearVelocity));
             } else {
                 temp1 = 1.0f;
-                func_8084029C(this, 1.2f + ((REG(38) / 1000.0f) * temp2));
+                // FD (2026-07-13): run-cadence BASE 1.2 -> 0.6 for Fierce Deity (2ship parity) so the legs don't
+                // over-cycle at the higher FD run speed. Always on now (toggle retired). Adult/child keep 1.2.
+                func_8084029C(this, (LINK_IS_DEITY ? 0.6f : 1.2f) + ((REG(38) / 1000.0f) * temp2));
             }
             LinkAnimation_LoadToMorph(play, &this->skelAnime,
                                       GET_PLAYER_ANIM(PLAYER_ANIMGROUP_back_walk, this->modelAnimType), this->unk_868);
@@ -8827,7 +10040,9 @@ void func_80841EE4(Player* this, PlayState* play) {
                 func_8084029C(this, (REG(35) / 1000.0f) + ((REG(36) / 1000.0f) * this->linearVelocity));
             } else {
                 temp1 = 1.0f;
-                func_8084029C(this, 1.2f + ((REG(38) / 1000.0f) * temp2));
+                // FD (2026-07-13): run-cadence BASE 1.2 -> 0.6 for Fierce Deity (2ship parity) so the legs don't
+                // over-cycle at the higher FD run speed. Always on now (toggle retired). Adult/child keep 1.2.
+                func_8084029C(this, (LINK_IS_DEITY ? 0.6f : 1.2f) + ((REG(38) / 1000.0f) * temp2));
             }
 
             func_80841CC4(this, 1, play);
@@ -8842,8 +10057,8 @@ void func_80841EE4(Player* this, PlayState* play) {
 }
 
 void Player_Action_80842180(Player* this, PlayState* play) {
-    f32 speedTarget;
-    s16 yawTarget;
+    f32 sp2C;
+    s16 sp2A;
 
     this->stateFlags2 |= PLAYER_STATE2_DISABLE_ROTATION_Z_TARGET;
     func_80841EE4(this, play);
@@ -8854,15 +10069,33 @@ void Player_Action_80842180(Player* this, PlayState* play) {
             return;
         }
 
-        Player_GetMovementSpeedAndYaw(this, &speedTarget, &yawTarget, SPEED_MODE_CURVED, play);
+        Player_GetMovementSpeedAndYaw(this, &sp2C, &sp2A, SPEED_MODE_CURVED, play);
 
-        if (!func_8083C484(this, &speedTarget, &yawTarget)) {
-            GameInteractor_Should(VB_PLAYER_MODIFY_RUN_SPEED, true, this, &speedTarget);
+        if (!func_8083C484(this, &sp2C, &sp2A)) {
 
-            func_8083DF68(this, speedTarget, yawTarget);
+            if (CVarGetInteger(CVAR_ENHANCEMENT("MMBunnyHood"), BUNNY_HOOD_VANILLA) != BUNNY_HOOD_VANILLA &&
+                this->currentMask == PLAYER_MASK_BUNNY) {
+                sp2C *= 1.5f;
+            }
+
+            if (CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f) != 1.0f) {
+                if (CVarGetInteger(CVAR_CHEAT("SpeedModifier.SpeedToggle"), 0)) {
+                    if (gWalkSpeedToggle) {
+                        sp2C *= CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f);
+                    }
+                } else {
+                    const s32 mod1Mask = CVarGetInteger(CVAR_CHEAT("SpeedModifier.Btn"), BTN_CUSTOM_MODIFIER1);
+
+                    if (mod1Mask != 0 && CHECK_BTN_ALL(sControlInput->cur.button, mod1Mask)) {
+                        sp2C *= CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f);
+                    }
+                }
+            }
+
+            func_8083DF68(this, sp2C, sp2A);
             func_8083DDC8(this, play);
 
-            if ((this->linearVelocity == 0.0f) && (speedTarget == 0.0f)) {
+            if ((this->linearVelocity == 0.0f) && (sp2C == 0.0f)) {
                 func_8083C0B8(this, play);
             }
         }
@@ -9082,7 +10315,10 @@ s32 func_80842AC4(PlayState* play, Player* this) {
 
 s32 func_80842B7C(PlayState* play, Player* this) {
     if (this->heldItemAction == PLAYER_IA_SWORD_BIGGORON) {
-        if (!gSaveContext.bgsFlag && (gSaveContext.swordHealth > 0.0f)) {
+        // FD (2026-07-11): the Fierce Deity sword shares PLAYER_IA_SWORD_BIGGORON but must NOT degrade/break
+        // like the Giant's Knife -- exempt FD and anyone holding ITEM_SWORD_DEITY (RE z_player.c:8641).
+        if (!(gSaveContext.bgsFlag || LINK_IS_DEITY || this->heldItemId == ITEM_SWORD_DEITY) &&
+            (gSaveContext.swordHealth > 0.0f)) {
             if ((gSaveContext.swordHealth -= 1.0f) <= 0.0f) {
                 EffectSsStick_Spawn(play, &this->bodyPartsPos[PLAYER_BODYPART_R_HAND],
                                     this->actor.shape.rot.y + 0x8000);
@@ -9160,7 +10396,7 @@ s32 func_80842DF4(PlayState* play, Player* this) {
                     if (BgCheck_EntityLineTest1(&play->colCtx, &sp68, &this->meleeWeaponInfo[0].tip, &sp5C, &sp78, true,
                                                 false, false, true, &sp74) &&
                         !SurfaceType_IsIgnoredByEntities(&play->colCtx, sp78, sp74) &&
-                        (SurfaceType_GetFloorType(&play->colCtx, sp78, sp74) != 6) &&
+                        (func_80041D4C(&play->colCtx, sp78, sp74) != 6) &&
                         (func_8002F9EC(play, &this->actor, sp78, sp74, &sp5C) == 0)) {
 
                         if (this->heldItemAction == PLAYER_IA_HAMMER) {
@@ -9213,7 +10449,8 @@ s32 func_80842DF4(PlayState* play, Player* this) {
 
                 if (this->actor.colChkInfo.atHitEffect == 1) {
                     this->actor.colChkInfo.damage = 8;
-                    func_80837C0C(play, this, PLAYER_HIT_RESPONSE_ELECTRIFIED, 0.0f, 0.0f, this->actor.shape.rot.y, 20);
+                    func_80837C0C(play, this, PLAYER_HIT_RESPONSE_ELECTRIC_SHOCK, 0.0f, 0.0f, this->actor.shape.rot.y,
+                                  20);
                     return 1;
                 }
             }
@@ -9382,7 +10619,7 @@ void Player_Action_8084377C(Player* this, PlayState* play) {
         }
     }
 
-    if (LinkAnimation_Update(play, &this->skelAnime) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+    if (LinkAnimation_Update(play, &this->skelAnime) && (this->actor.bgCheckFlags & 1)) {
         if (this->av2.actionVar2 != 0) {
             this->av2.actionVar2--;
             if (this->av2.actionVar2 == 0) {
@@ -9404,7 +10641,7 @@ void Player_Action_8084377C(Player* this, PlayState* play) {
         }
     }
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND_TOUCH) {
+    if (this->actor.bgCheckFlags & 2) {
         Player_PlayFloorSfx(this, NA_SE_PL_BOUND);
     }
 }
@@ -9436,7 +10673,7 @@ static AnimSfxEntry D_808545DC[] = {
 };
 
 void Player_Action_80843A38(Player* this, PlayState* play) {
-    s32 interruptResult;
+    s32 sp24;
 
     this->stateFlags2 |= PLAYER_STATE2_DISABLE_ROTATION_Z_TARGET;
     func_808382BC(this);
@@ -9444,8 +10681,8 @@ void Player_Action_80843A38(Player* this, PlayState* play) {
     if (this->stateFlags1 & PLAYER_STATE1_IN_CUTSCENE) {
         LinkAnimation_Update(play, &this->skelAnime);
     } else {
-        interruptResult = Player_TryActionInterrupt(play, this, &this->skelAnime, 16.0f);
-        if ((interruptResult != 0) && (LinkAnimation_Update(play, &this->skelAnime) || (interruptResult > 0))) {
+        sp24 = Player_TryActionInterrupt(play, this, &this->skelAnime, 16.0f);
+        if ((sp24 != 0) && (LinkAnimation_Update(play, &this->skelAnime) || (sp24 > 0))) {
             func_80839F90(this, play);
         }
     }
@@ -9480,13 +10717,13 @@ void func_80843AE8(PlayState* play, Player* this) {
             }
             this->unk_A87 = 20;
             Player_SetInvulnerability(this, -20);
-            Audio_SetBgmVolumeOnDuringFanfare();
+            func_800F47FC();
         }
     } else if (this->av1.actionVar1 != 0) {
         this->av2.actionVar2 = 60;
         Player_SpawnFairy(play, this, &this->actor.world.pos, &D_808545E4, FAIRY_REVIVE_DEATH);
         Player_PlaySfx(this, NA_SE_EV_FIATY_HEAL - SFX_FLAG);
-        OnePointCutscene_Init(play, 9908, 125, &this->actor, CAM_ID_MAIN);
+        OnePointCutscene_Init(play, 9908, 125, &this->actor, MAIN_CAM);
     } else if (play->gameOverCtx.state == GAMEOVER_DEATH_WAIT_GROUND) {
         play->gameOverCtx.state = GAMEOVER_DEATH_DELAY_MENU;
         if (!CVarGetInteger(CVAR_ENHANCEMENT("PersistentMasks"), 0)) {
@@ -9543,23 +10780,23 @@ static FallImpactInfo D_80854600[] = {
 };
 
 s32 func_80843E64(PlayState* play, Player* this) {
-    s32 fallDistance;
+    s32 sp34;
 
     if (!GameInteractor_Should(VB_RECIEVE_FALL_DAMAGE, true, this)) {
         return 0;
     }
 
     if ((sFloorType == 6) || (sFloorType == 9)) {
-        fallDistance = 0;
+        sp34 = 0;
     } else {
-        fallDistance = this->fallDistance;
+        sp34 = this->fallDistance;
     }
 
     Math_StepToF(&this->linearVelocity, 0.0f, 1.0f);
 
     this->stateFlags1 &= ~(PLAYER_STATE1_JUMPING | PLAYER_STATE1_FREEFALL);
 
-    if (fallDistance >= 400) {
+    if (sp34 >= 400) {
         s32 impactIndex;
         FallImpactInfo* impactInfo;
 
@@ -9586,14 +10823,14 @@ s32 func_80843E64(PlayState* play, Player* this) {
         return impactIndex + 1;
     }
 
-    if (fallDistance > 200) {
-        fallDistance *= 2;
+    if (sp34 > 200) {
+        sp34 *= 2;
 
-        if (fallDistance > 255) {
-            fallDistance = 255;
+        if (sp34 > 255) {
+            sp34 = 255;
         }
 
-        Player_RequestRumble(this, (u8)fallDistance, (u8)(fallDistance * 0.1f), (u8)fallDistance, 0);
+        Player_RequestRumble(this, (u8)sp34, (u8)(sp34 * 0.1f), (u8)sp34, 0);
 
         if (sFloorType == 6) {
             Player_PlayVoiceSfx(this, NA_SE_VO_LI_CLIMB_END);
@@ -9630,7 +10867,7 @@ void Player_Action_8084411C(Player* this, PlayState* play) {
 
     Player_GetMovementSpeedAndYaw(this, &sp4C, &sp4A, SPEED_MODE_LINEAR, play);
 
-    if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+    if (!(this->actor.bgCheckFlags & 1)) {
         if (this->stateFlags1 & PLAYER_STATE1_CARRYING_ACTOR) {
             Actor* heldActor = this->heldActor;
 
@@ -9656,8 +10893,7 @@ void Player_Action_8084411C(Player* this, PlayState* play) {
             !func_8083BBA0(this, play)) {
             if (this->actor.velocity.y < 0.0f) {
                 if (this->av2.actionVar2 >= 0) {
-                    if ((this->actor.bgCheckFlags & BGCHECKFLAG_WALL) || (this->av2.actionVar2 == 0) ||
-                        (this->fallDistance > 0)) {
+                    if ((this->actor.bgCheckFlags & 8) || (this->av2.actionVar2 == 0) || (this->fallDistance > 0)) {
                         if ((sYDistToFloor > 800.0f) || (this->stateFlags1 & PLAYER_STATE1_HOOKSHOT_FALLING)) {
                             func_80843E14(this, NA_SE_VO_LI_FALL_S);
                             this->stateFlags1 &= ~PLAYER_STATE1_HOOKSHOT_FALLING;
@@ -9673,8 +10909,7 @@ void Player_Action_8084411C(Player* this, PlayState* play) {
                         func_80843E14(this, NA_SE_VO_LI_FALL_L);
                     }
 
-                    if (!GameInteractor_GetDisableLedgeGrabsActive() &&
-                        (this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) &&
+                    if (!GameInteractor_GetDisableLedgeGrabsActive() && (this->actor.bgCheckFlags & 0x200) &&
                         !(this->stateFlags2 & PLAYER_STATE2_HOPPING) &&
                         !(this->stateFlags1 & (PLAYER_STATE1_CARRYING_ACTOR | PLAYER_STATE1_IN_WATER)) &&
                         (this->linearVelocity > 0.0f)) {
@@ -9712,6 +10947,13 @@ void Player_Action_8084411C(Player* this, PlayState* play) {
             }
         } else if (this->skelAnime.animation == &gPlayerAnim_link_normal_run_jump) {
             anim = &gPlayerAnim_link_normal_run_jump_end;
+            // FD (2026-07-15): MM Flips -- pair the matching MM landing when the run-jump was swapped for an MM flip
+            // (front-flip jump -> front-flip land, somersault jump -> somersault land). Same identity-compare the
+            // vanilla run_jump path uses, so non-gated forms fall through to the normal landing untouched.
+        } else if (this->skelAnime.animation == (void*)gPlayerAnim_mmjumps_front_flip_jump) {
+            anim = (LinkAnimationHeader*)gPlayerAnim_mmjumps_front_flip_land;
+        } else if (this->skelAnime.animation == (void*)gPlayerAnim_mmjumps_somersault_jump) {
+            anim = (LinkAnimationHeader*)gPlayerAnim_mmjumps_somersault_land;
         } else if (Player_CheckHostileLockOn(this)) {
             anim = &gPlayerAnim_link_anchor_landingR;
             func_80833C3C(this);
@@ -9777,9 +11019,7 @@ void Player_Action_Roll(Player* this, PlayState* play) {
             // Must have a speed of 7 or above to be able to bonk into something
             if (this->linearVelocity >= 7.0f) {
                 bool randomBonk = GameInteractor_GetRandomBonksActive() && (Rand_ZeroOne() <= .05);
-                if (randomBonk ||
-                    ((this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) &&
-                     (sWorldYawToTouchedWall < 0x2000)) ||
+                if (randomBonk || ((this->actor.bgCheckFlags & 0x200) && (sWorldYawToTouchedWall < 0x2000)) ||
                     ((this->cylinder.base.ocFlags1 & OC1_HIT) &&
                      (ocCollidedActor = this->cylinder.base.oc,
                       ((ocCollidedActor->id == ACTOR_EN_WOOD02) &&
@@ -9814,10 +11054,6 @@ void Player_Action_Roll(Player* this, PlayState* play) {
                 }
             }
 
-            if (GameInteractor_Should(VB_PLAYER_ROLL_CHAIN, false, this, play, sControlInput, sFloorType)) {
-                return;
-            }
-
             if ((this->skelAnime.curFrame < 15.0f) || !Player_ActionHandler_7(this, play)) {
                 if (this->skelAnime.curFrame >= 20.0f) {
                     func_8083A060(this, play);
@@ -9828,18 +11064,18 @@ void Player_Action_Roll(Player* this, PlayState* play) {
                 Player_GetMovementSpeedAndYaw(this, &speedTarget, &yawTarget, SPEED_MODE_CURVED, play);
 
                 // `speedTarget` at this point is the speed that would be used for regular walking.
-                // Rolling speed is 1.5 times faster than walking speed would be for the current control stick input.
+                // Rolling speed is 1.5 times faster than what the walking speed would be for the current control stick
+                // input.
                 speedTarget *= 1.5f;
 
                 if ((speedTarget < 3.0f) || (this->controlStickDirections[this->controlStickDataIndex] != 0)) {
                     speedTarget = 3.0f;
                 }
 
-                GameInteractor_Should(VB_PLAYER_ROLL_STEER, false, this, play, yawTarget);
                 func_8083DF68(this, speedTarget, this->actor.shape.rot.y);
 
                 if (func_8084269C(play, this)) {
-                    Actor_PlaySfx_Flagged2(&this->actor, NA_SE_PL_ROLL_DUST - SFX_FLAG);
+                    func_8002F8F0(&this->actor, NA_SE_PL_ROLL_DUST - SFX_FLAG);
                 }
 
                 Player_ProcessAnimSfxList(this, sRollAnimSfxList);
@@ -9857,7 +11093,7 @@ void Player_Action_80844A44(Player* this, PlayState* play) {
 
     Math_StepToF(&this->linearVelocity, 0.0f, 0.05f);
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+    if (this->actor.bgCheckFlags & 1) {
         this->actor.colChkInfo.damage = 0x10;
         func_80837C0C(play, this, PLAYER_HIT_RESPONSE_KNOCKBACK_LARGE, 4.0f, 5.0f, this->actor.shape.rot.y, 20);
     }
@@ -9875,7 +11111,7 @@ void Player_Action_80844AF4(Player* this, PlayState* play) {
     if (!func_80842DF4(play, this)) {
         func_8084285C(this, 6.0f, 7.0f, 99.0f);
 
-        if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+        if (!(this->actor.bgCheckFlags & 1)) {
             Player_GetMovementSpeedAndYaw(this, &speedTarget, &yawTarget, SPEED_MODE_LINEAR, play);
             func_8083DFE0(this, &speedTarget, &this->yaw);
             return;
@@ -10370,7 +11606,7 @@ void Player_Action_80845EF8(Player* this, PlayState* play) {
         } else {
             func_8083C0E8(this, play);
             if (play->roomCtx.prevRoom.num >= 0) {
-                Room_FinishRoomChange(play, &play->roomCtx);
+                func_80097534(play, &play->roomCtx);
             }
             func_8005B1A4(Play_GetCamera(play, 0));
             Play_SetupRespawnPoint(play, 0, 0xDFF);
@@ -10626,7 +11862,7 @@ void Player_StartMode_Nothing(PlayState* play, Player* this) {
 
 void Player_StartMode_BlueWarp(PlayState* play, Player* this) {
     Player_SetupAction(play, this, Player_Action_8084F710, 0);
-    if ((play->sceneNum == SCENE_LAKE_HYLIA) && (gSaveContext.sceneLayer >= 4)) {
+    if ((play->sceneNum == SCENE_LAKE_HYLIA) && (gSaveContext.sceneSetupIndex >= 4)) {
         this->av1.actionVar1 = 1;
     }
     this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE;
@@ -10677,15 +11913,11 @@ void Player_StartMode_Door(PlayState* play, Player* this) {
 }
 
 void Player_StartMode_Grotto(PlayState* play, Player* this) {
-    // If can respawn from water to grotto, need to set normal speed factor for the jump
-    if (IS_RANDO) {
-        sWaterSpeedFactor = 1.0f;
-    }
     func_808389E8(this, &gPlayerAnim_link_normal_jump, 12.0f, play);
     Player_SetupAction(play, this, Player_Action_8084F9C0, 0);
     this->stateFlags1 |= PLAYER_STATE1_IN_CUTSCENE;
     this->fallStartHeight = this->actor.world.pos.y;
-    OnePointCutscene_Init(play, 5110, 40, &this->actor, CAM_ID_MAIN);
+    OnePointCutscene_Init(play, 5110, 40, &this->actor, MAIN_CAM);
 }
 
 void Player_StartMode_KnockedOver(PlayState* play, Player* this) {
@@ -10773,6 +12005,36 @@ static void (*sStartModeFuncs[PLAYER_START_MODE_MAX])(PlayState* play, Player* t
 
 static Vec3f D_80854778 = { 0.0f, 50.0f, 0.0f };
 
+// FD (2026-07-11) 4g: minimal immediate age/form commit. Ported from SOURCE z_player.c:13811 with
+// Object_LoadPlayer/DMA STRIPPED (the FD skeleton rides inside the already-resident object_link_boy).
+// TARGET divergence: SoH stores the upper-body skeleton in `upperSkelAnime` (there is no `skelAnime2`),
+// so BOTH skelAnime.skeleton and upperSkelAnime.skeleton are re-pointed. TARGET also has no
+// LINK_AGE_GORON, so SOURCE's `age >= LINK_AGE_GORON` empty-hands reset is dropped (FD keeps its sword).
+void Player_ChangeAge(Player* this, PlayState* play, s16 age) {
+    // FD (2026-07-11) 4g: SoH stores gPlayerSkelHeaders[] entries as OTR resource-path strings, NOT real
+    // structs -- so resolve the path via ResourceMgr (exactly as SkelAnime_InitLink does) before deref,
+    // else sh.segment reads the path string bytes as a pointer (garbage/crash).
+    FlexSkeletonHeader* skeletonHeaderSeg = gPlayerSkelHeaders[((void)0, age)];
+    FlexSkeletonHeader* skeletonHeader;
+    u8 i;
+
+    // swap equipment icons on the HUD (mirrors SOURCE 13823)
+    for (i = 0; i < 4; i++) {
+        Interface_LoadItemIcon1(play, i);
+    }
+
+    play->linkAgeOnLoad = gSaveContext.linkAge = this->transformTargetForm = age;
+    this->ageProperties = &sAgeProperties[gSaveContext.linkAge];
+
+    if (ResourceMgr_OTRSigCheck(skeletonHeaderSeg) != 0) {
+        skeletonHeaderSeg = ResourceMgr_LoadSkeletonByName((char*)skeletonHeaderSeg, &this->skelAnime);
+    }
+    skeletonHeader = SEGMENTED_TO_VIRTUAL(skeletonHeaderSeg);
+    this->skelAnime.skeleton = SEGMENTED_TO_VIRTUAL(skeletonHeader->sh.segment);
+    this->upperSkelAnime.skeleton = SEGMENTED_TO_VIRTUAL(skeletonHeader->sh.segment);
+    Player_SetEquipmentData(play, this);
+}
+
 void Player_Init(Actor* thisx, PlayState* play2) {
     Player* this = (Player*)thisx;
     PlayState* play = play2;
@@ -10781,6 +12043,13 @@ void Player_Init(Actor* thisx, PlayState* play2) {
     s32 startMode;
     s32 respawnFlag;
     s32 respawnMode;
+
+    // FD (2026-07-11) DEBUG: spawn directly as Fierce Deity to test FD rendering without the
+    // mask-transform flow. Console: `set gFierceDeityForm 1` then load a save. Uses the proven
+    // SkelAnime_InitLink path (correct joint allocation) since it forces linkAge before init.
+    if (CVarGetInteger(CVAR_ENHANCEMENT("FierceDeityForm"), 0)) {
+        gSaveContext.linkAge = LINK_AGE_DEITY;
+    }
 
     play->shootingGalleryStatus = play->bombchuBowlingStatus = 0;
 
@@ -10796,6 +12065,7 @@ void Player_Init(Actor* thisx, PlayState* play2) {
 
     thisx->room = -1;
     this->ageProperties = &sAgeProperties[gSaveContext.linkAge];
+    this->transformTargetForm = gSaveContext.linkAge; // FD (2026-07-11) 4d (light/maskObjectSegment = cutscene only, skipped)
     this->itemAction = this->heldItemAction = -1;
     this->heldItemId = ITEM_NONE;
 
@@ -10814,6 +12084,17 @@ void Player_Init(Actor* thisx, PlayState* play2) {
     // get item objects is 0x2000 (see the assert in func_8083AE40), and the maximum size for
     // title cards is 0x1000 * LANGUAGE_MAX since each title card image includes all languages.
     this->giObjectSegment = (void*)(((uintptr_t)ZELDA_ARENA_MALLOC_DEBUG(0x3008) + 8) & ~0xF);
+
+    // FD (2026-07-11) Task 1: register the transform point-light glow in the scene's light context (RE
+    // Player_Init ~11895). It stays inert (radius -1) until Player_UpdateTransformLights drives it during the
+    // mask-transform cutscene. Removed in Player_Destroy.
+    if (this->actor.category == ACTORCAT_PLAYER) {
+        Lights_PointNoGlowSetInfo(&this->lightInfo, this->actor.world.pos.x, this->actor.world.pos.y,
+                                  this->actor.world.pos.z, 255, 128, 0, -1);
+        this->lightNode = LightContext_InsertLight(play, &play->lightCtx, &this->lightInfo);
+    } else {
+        this->lightNode = NULL;
+    }
 
     respawnFlag = gSaveContext.respawnFlag;
 
@@ -10845,8 +12126,8 @@ void Player_Init(Actor* thisx, PlayState* play2) {
     if ((respawnFlag == 0) || (respawnFlag < -1)) {
         titleFileSize = scene->titleFile.vromEnd - scene->titleFile.vromStart;
         if (GameInteractor_Should(VB_SHOW_TITLE_CARD, gSaveContext.showTitleCard)) {
-            if ((gSaveContext.sceneLayer < 4) &&
-                (gEntranceTable[((void)0, gSaveContext.entranceIndex) + ((void)0, gSaveContext.sceneLayer)].field &
+            if ((gSaveContext.sceneSetupIndex < 4) &&
+                (gEntranceTable[((void)0, gSaveContext.entranceIndex) + ((void)0, gSaveContext.sceneSetupIndex)].field &
                  ENTRANCE_INFO_DISPLAY_TITLE_CARD_FLAG) &&
                 ((play->sceneNum != SCENE_DODONGOS_CAVERN) ||
                  (Flags_GetEventChkInf(EVENTCHKINF_ENTERED_DODONGOS_CAVERN))) &&
@@ -11030,7 +12311,7 @@ void Player_UpdateInterface(PlayState* play, Player* this) {
                     doAction = DO_ACTION_ENTER;
                 } else if ((this->stateFlags1 & PLAYER_STATE1_CARRYING_ACTOR) && (this->getItemId == GI_NONE) &&
                            (heldActor != NULL)) {
-                    if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) || (heldActor->id == ACTOR_EN_NIW)) {
+                    if ((this->actor.bgCheckFlags & 1) || (heldActor->id == ACTOR_EN_NIW)) {
                         if (func_8083EAF0(this, heldActor) == 0) {
                             doAction = DO_ACTION_DROP;
                         } else {
@@ -11112,21 +12393,24 @@ void Player_UpdateInterface(PlayState* play, Player* this) {
 s32 Player_UpdateHoverBoots(Player* this) {
     s32 canHoverOnGround;
 
-    if ((this->currentBoots == PLAYER_BOOTS_HOVER) && (this->hoverBootsTimer != 0)) {
+    if ((this->currentBoots == PLAYER_BOOTS_HOVER ||
+         (CVarGetInteger(CVAR_ENHANCEMENT("IvanCoopModeEnabled"), 0) && this->ivanFloating)) &&
+        (this->hoverBootsTimer != 0)) {
         this->hoverBootsTimer--;
     } else {
         this->hoverBootsTimer = 0;
     }
 
     canHoverOnGround =
-        (this->currentBoots == PLAYER_BOOTS_HOVER) &&
+        (this->currentBoots == PLAYER_BOOTS_HOVER ||
+         (CVarGetInteger(CVAR_ENHANCEMENT("IvanCoopModeEnabled"), 0) && this->ivanFloating)) &&
         ((this->actor.yDistToWater >= 0.0f) || (func_80838144(sFloorType) >= 0) || func_8083816C(sFloorType));
 
-    if (canHoverOnGround && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && (this->hoverBootsTimer != 0)) {
+    if (canHoverOnGround && (this->actor.bgCheckFlags & 1) && (this->hoverBootsTimer != 0)) {
         this->actor.bgCheckFlags &= ~1;
     }
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+    if (this->actor.bgCheckFlags & 1) {
         if (!canHoverOnGround) {
             this->hoverBootsTimer = 19;
         }
@@ -11252,7 +12536,7 @@ void Player_ProcessSceneCollision(PlayState* play, Player* this) {
             sIsFloorConveyor = SurfaceType_IsConveyor(&play->colCtx, floorPoly, this->actor.floorBgId);
             if (((sIsFloorConveyor == 0) && (this->actor.yDistToWater > 20.0f) &&
                  (this->currentBoots != PLAYER_BOOTS_IRON)) ||
-                ((sIsFloorConveyor != 0) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND))) {
+                ((sIsFloorConveyor != 0) && (this->actor.bgCheckFlags & 1))) {
                 sConveyorYaw = SurfaceType_GetConveyorDirection(&play->colCtx, floorPoly, this->actor.floorBgId) << 10;
             } else {
                 sConveyorSpeed = 0;
@@ -11264,7 +12548,7 @@ void Player_ProcessSceneCollision(PlayState* play, Player* this) {
 
     this->actor.bgCheckFlags &= ~0x200;
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_WALL) {
+    if (this->actor.bgCheckFlags & 8) {
         CollisionPoly* wallPoly;
         s32 wallBgId;
         s16 yawDiff;
@@ -11288,7 +12572,56 @@ void Player_ProcessSceneCollision(PlayState* play, Player* this) {
 
         sTouchedWallFlags = func_80041DB8(&play->colCtx, this->actor.wallPoly, this->actor.wallBgId);
 
-        GameInteractor_Should(VB_REVALIDATE_CLIMBED_WALL, true, play, this, &sTouchedWallFlags, &yawDiff);
+        // conflicts arise from these two being enabled at once, and with ClimbEverything on, FixVineFall is redundant
+        // anyway
+        if (CVarGetInteger(CVAR_ENHANCEMENT("FixVineFall"), 0) && !CVarGetInteger(CVAR_CHEAT("ClimbEverything"), 0)) {
+            /* This fixes the "started climbing a wall and then immediately fell off" bug.
+             * The main idea is if a climbing wall is detected, double-check that it will
+             * still be valid once climbing begins by doing a second raycast with a small
+             * margin to make sure it still hits a climbable poly. Then update the flags
+             * in sTouchedWallFlags again and proceed as normal.
+             */
+            if (sTouchedWallFlags & 8) {
+                Vec3f checkPosA;
+                Vec3f checkPosB;
+                f32 yawCos;
+                f32 yawSin;
+                s32 hitWall;
+
+                /* Angle the raycast slightly out towards the side based on the angle of
+                 * attack the player takes coming at the climb wall. This is necessary because
+                 * the player's XZ position actually wobbles very slightly while climbing
+                 * due to small rounding errors in the sin/cos lookup tables. This wobble
+                 * can cause wall checks while climbing to be slightly left or right of
+                 * the wall check to start the climb. By adding this buffer it accounts for
+                 * any possible wobble. The end result is the player has to be further than
+                 * some epsilon distance from the edge of the climbing poly to actually
+                 * start the climb. I divide it by 2 to make that epsilon slightly smaller,
+                 * mainly for visuals. Using the full yawDiff leaves a noticeable gap on
+                 * the edges that can't be climbed. But with the half distance it looks like
+                 * the player is climbing right on the edge, and still works.
+                 */
+                yawCos = Math_CosS(this->actor.wallYaw - (yawDiff / 2) + 0x8000);
+                yawSin = Math_SinS(this->actor.wallYaw - (yawDiff / 2) + 0x8000);
+                checkPosA.x = this->actor.world.pos.x + (-20.0f * yawSin);
+                checkPosA.z = this->actor.world.pos.z + (-20.0f * yawCos);
+                checkPosB.x = this->actor.world.pos.x + (50.0f * yawSin);
+                checkPosB.z = this->actor.world.pos.z + (50.0f * yawCos);
+                checkPosB.y = checkPosA.y = this->actor.world.pos.y + 26.0f;
+
+                hitWall = BgCheck_EntityLineTest1(&play->colCtx, &checkPosA, &checkPosB, &sInteractWallCheckResult,
+                                                  &wallPoly, true, false, false, true, &wallBgId);
+
+                if (hitWall) {
+                    this->actor.wallPoly = wallPoly;
+                    this->actor.wallBgId = wallBgId;
+                    this->actor.wallYaw = Math_Atan2S(wallPoly->normal.z, wallPoly->normal.x);
+                    yawDiff = this->actor.shape.rot.y - (s16)(this->actor.wallYaw + 0x8000);
+
+                    sTouchedWallFlags = func_80041DB8(&play->colCtx, this->actor.wallPoly, this->actor.wallBgId);
+                }
+            }
+        }
 
         sShapeYawToTouchedWall = ABS(yawDiff);
 
@@ -11300,7 +12633,7 @@ void Player_ProcessSceneCollision(PlayState* play, Player* this) {
 
         vSpeedScale = sWorldYawToTouchedWall * 0.00008f;
 
-        if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) || vSpeedScale >= 1.0f) {
+        if (!(this->actor.bgCheckFlags & 1) || vSpeedScale >= 1.0f) {
             this->unk_880 = R_RUN_SPEED_LIMIT / 100.0f;
         } else {
             vSpeedLimit = (R_RUN_SPEED_LIMIT / 100.0f * vSpeedScale);
@@ -11311,10 +12644,10 @@ void Player_ProcessSceneCollision(PlayState* play, Player* this) {
             }
         }
 
-        if ((this->actor.bgCheckFlags & BGCHECKFLAG_PLAYER_WALL_INTERACT) && (sShapeYawToTouchedWall < 0x3000)) {
+        if ((this->actor.bgCheckFlags & 0x200) && (sShapeYawToTouchedWall < 0x3000)) {
             CollisionPoly* wallPoly = this->actor.wallPoly;
 
-            if (GameInteractor_Should(VB_SURFACE_ANGLE_IS_CLIMBABLE, ABS(wallPoly->normal.y) < 600)) {
+            if (ABS(wallPoly->normal.y) < 600 || (CVarGetInteger(CVAR_CHEAT("ClimbEverything"), 0) != 0)) {
                 f32 wallPolyNormalX = COLPOLY_GET_NORMAL(wallPoly->normal.x);
                 f32 wallPolyNormalY = COLPOLY_GET_NORMAL(wallPoly->normal.y);
                 f32 wallPolyNormalZ = COLPOLY_GET_NORMAL(wallPoly->normal.z);
@@ -11388,9 +12721,9 @@ void Player_ProcessSceneCollision(PlayState* play, Player* this) {
         this->ledgeClimbDelayTimer = 0;
     }
 
-    if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+    if (this->actor.bgCheckFlags & 1) {
         if (GameInteractor_Should(VB_SET_STATIC_FLOOR_TYPE, true, this)) {
-            sFloorType = SurfaceType_GetFloorType(&play->colCtx, floorPoly, this->actor.floorBgId);
+            sFloorType = func_80041D4C(&play->colCtx, floorPoly, this->actor.floorBgId);
         }
 
         if (!Player_UpdateHoverBoots(this)) {
@@ -11477,7 +12810,7 @@ void Player_UpdateCamAndSeqModes(PlayState* play, Player* this) {
                 if (CVarGetInteger(CVAR_ENHANCEMENT("BoomerangFirstPerson"), 0)) {
                     // Avoid camera jumps by switching  to normal cam to exit the first person camera,
                     // before following the boomerang
-                    if (Play_GetCamera(play, 0)->mode == CAM_MODE_FIRST_PERSON) {
+                    if (Play_GetCamera(play, 0)->mode == CAM_MODE_FIRSTPERSON) {
                         camMode = CAM_MODE_NORMAL;
                     } else {
                         camMode = CAM_MODE_FOLLOWBOOMERANG;
@@ -11593,7 +12926,7 @@ void Player_UpdateBodyShock(PlayState* play, Player* this) {
         shockPos.z = (Rand_CenteredFloat(5.0f) + randBodyPart->z) - this->actor.world.pos.z;
 
         EffectSsFhgFlash_SpawnShock(play, &this->actor, &shockPos, shockScale, FHGFLASH_SHOCK_PLAYER);
-        Actor_PlaySfx_Flagged2(&this->actor, NA_SE_PL_SPARK - SFX_FLAG);
+        func_8002F8F0(&this->actor, NA_SE_PL_SPARK - SFX_FLAG);
     }
 }
 
@@ -11767,10 +13100,236 @@ static Vec3f D_80854814 = { 0.0f, 0.0f, 200.0f };
 static f32 sWaterConveyorSpeeds[] = { 2.0f, 4.0f, 7.0f };
 static f32 sFloorConveyorSpeeds[] = { 0.5f, 1.0f, 3.0f };
 
+// FD (2026-07-11): Fierce Deity blade sparkle trail (RE z_player.c:11150 Player_FierceDeityParticles).
+// Cyan KiraKira dispersed along the sword blade; reads the current melee-weapon tip/base.
+void Player_FierceDeityParticles(Player* this, PlayState* play) {
+    Color_RGBA8 prim = { 0x64, 0xFF, 0xFF, 0x00 };
+    Color_RGBA8 env = { 0x00, 0x64, 0x64, 0x00 };
+    Vec3f particleVelocity = { 0.009f, 1.7f, 0.1f };
+    Vec3f diff;
+    Vec3f result1;
+    Vec3f result2;
+    Vec3f out;
+    Vec3f out2;
+    u16 i;
+
+    for (i = 0; i < 2; i++) {
+        Math_Vec3f_Diff(&this->meleeWeaponInfo->base, &this->meleeWeaponInfo->tip, &diff);
+        Math_Vec3f_SumScaled(&this->meleeWeaponInfo->tip, &diff, 0.3f, &result1);
+        Math_Vec3f_SumScaled(&this->meleeWeaponInfo->tip, &diff, Rand_ZeroOne(), &result2);
+        Math_Vec3f_AddRand(&result2, 15.0f, &result2);
+        Math_Vec3f_DistXYZAndStoreNormDiff(&result1, &result2, particleVelocity.y, &out);
+        Math_Vec3f_ScaleAndStore(&out, particleVelocity.x, &out2);
+        EffectSsKiraKira_SpawnDispersed(play, &result2, &out, &out2, &prim, &env,
+                                        Rand_S16Offset(0xFFEC, (u16)0xFF88) * 30, 0xF);
+    }
+}
+
 void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
     s32 pad;
 
     sControlInput = input;
+
+    // FD (2026-07-12) BUG FIX: the FD mask shares SLOT_BOTTLE_1 for the kaleido display cycle, but it is not a
+    // real inventory item -- if it's left in the slot when the player saves, it overwrites the bottle and is lost
+    // on reload. Clear it back to the displaced bottle every gameplay frame so it can never be persisted.
+    Enhancement_RestoreDeityMaskBottleSlot();
+
+    // FD (2026-07-13): keep font 0's shared voice grunts pointed at MM's re-recorded samples while Fierce Deity is
+    // active, and at OoT's when not -- native, correct-context, adult-Link-untouched. Early-outs unless the form
+    // changed (see FdVoice_ApplyForm).
+    FdVoice_ApplyForm(LINK_IS_DEITY);
+
+    // FD (2026-07-13): make the FD ocarina resources resident on the game thread so the draw never does a racy
+    // load (the crash was gLinkFierceDeityRightHandNearDL failing to load mid-draw). Idempotent once pinned.
+    FdOcarina_EnsurePinned();
+
+    // FD (2026-07-12): interrupt the custom transform/revert WAV one-shots the instant the mask cutscene ends --
+    // natural completion OR an A-button skip (the skip just transitions the action away from Player_MaskTransformation).
+    // By a natural end the scream has already finished, so this only actually cuts sound on a skip.
+    {
+        static u8 sFdTransformWasActive = 0;
+        u8 nowActive = (this->actionFunc == Player_MaskTransformation);
+        if (sFdTransformWasActive && !nowActive) {
+            FdAudio_StopOneShots();
+        }
+        sFdTransformWasActive = nowActive;
+    }
+
+    // FD (2026-07-12) ★MASK-PRESS SHEATHE / STUCK-C-BUTTON FIX: pressing the FD-mask C-button right after a
+    // jumpslash (or any attack whose landing/recovery re-installs an action func the very next frame) starts the
+    // transform -- Player_SetupMaskTransformation sets actionFunc = Player_MaskTransformation, sheathes the sword
+    // via Player_UseItem(ITEM_NONE), and sets PLAYER_STATE3_TRANSFORMATION_MASK -- but the recovery action then
+    // OVERWRITES actionFunc before the cutscene ever advances. Player_MaskTransformation is the ONLY code that
+    // clears PLAYER_STATE3_TRANSFORMATION_MASK (at its natural end, ~4169); once preempted it never runs again, so
+    // the flag is stuck set. The C-button re-press guard (`!(stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK)` in
+    // Player_UseItem) then rejects EVERY subsequent mask press until a scene load resets stateFlags3 -- the reported
+    // "sheathes instead of untransforming, then the C-button dies until a level transition." Self-heal it: if the
+    // flag is set but the transform action is NOT the running action func (and no age-commit is mid-flight), the
+    // cutscene was preempted -- clear the stuck cutscene state and restore the snapshotted world lighting so it
+    // can't leak. The player's next press (now from a clean actionable state) transforms normally; the per-frame
+    // FD-sword-on-B force below re-arms the sheathed blade. ageChangeFlag<0 guard: never fire during the apex
+    // commit window (where Player_Draw briefly drives the age swap while actionFunc legitimately stays put).
+    if ((this->actor.category == ACTORCAT_PLAYER) && (this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK) &&
+        (this->actionFunc != Player_MaskTransformation) && (play->ageChangeFlag < 0)) {
+        this->stateFlags3 &= ~PLAYER_STATE3_TRANSFORMATION_MASK;
+        this->stateFlags1 &= ~(PLAYER_STATE1_IN_ITEM_CS | PLAYER_STATE1_IN_CUTSCENE);
+        *((AdjLightSettings*)play->envCtx.adjAmbientColor) = savedLightSettings;
+        sFdSettling = 0;
+        sFdMaskHandedOff = false;
+        FdAudio_StopOneShots();
+    }
+
+    // FD (2026-07-11) bug 5: robust per-frame FD-sword-on-B equip (RE per-frame invariant, z_player.c:12962).
+    // The white-fade apex commit already stashes the real B item into ship.fierceDeityBButtonMemory and sets
+    // ITEM_SWORD_DEITY (and the revert path restores it -- both confirmed working), but a later equipment refresh
+    // was knocking the FD sword back off B, so it never actually landed. Re-force the FD sword every frame while
+    // Deity. Deliberately does NOT re-stash the memory here: the apex already saved the true pre-transform item,
+    // so forcing the sword without touching the stash keeps the revert restore correct even if the item that
+    // transiently displaced the sword was spurious. Fishing pond / bombchu bowling are excluded to match the RE
+    // (those minigames swap the B item themselves).
+    if ((this->actor.category == ACTORCAT_PLAYER) && LINK_IS_DEITY && (play->sceneNum != SCENE_FISHING_POND) &&
+        (play->sceneNum != SCENE_BOMBCHU_BOWLING_ALLEY)) {
+        // FD (2026-07-12) #6: denied "error" tone for a disallowed AIMING item (bow/hookshot/longshot/slingshot).
+        // Non-aiming items are already caught in Player_UseItem (which the aiming items never reach) and in
+        // Player_ProcessItemButtons, but an aiming-item C-press is consumed by the first-person aim path BEFORE
+        // ProcessItemButtons runs, so its denial was silent. Player_UpdateCommon runs before that aim processing, so
+        // catch a fresh press of one of these four items here and play the tone once. Limited to the aiming items so
+        // it can't double with the ProcessItemButtons / Player_UseItem denial that covers everything else.
+        {
+            static const u16 sFdItemBtns[] = { BTN_B, BTN_CLEFT, BTN_CDOWN, BTN_CRIGHT };
+            s32 bi;
+            for (bi = 0; bi < 4; bi++) {
+                if (CHECK_BTN_ALL(input->press.button, sFdItemBtns[bi])) {
+                    s32 pressedItem = Player_GetItemOnButton(play, bi); // 0=B, 1..3=C-left/down/right
+                    if (((pressedItem == ITEM_BOW) || (pressedItem == ITEM_SLINGSHOT) ||
+                         (pressedItem == ITEM_HOOKSHOT) || (pressedItem == ITEM_LONGSHOT)) &&
+                        !Parameter_CanUseItem(pressedItem)) {
+                        Sfx_PlaySfxCentered(NA_SE_SY_ERROR);
+                        break;
+                    }
+                }
+            }
+        }
+        // FD (2026-07-11) bug 2: force the FD sword onto B every frame (RE z_player.c:12962). The B-slot force
+        // itself was correct -- nothing that runs per frame clobbers a sword-valued B (every button refresh in
+        // z_parameter.c treats a non-slingshot/bow/bombchu/none B item as a sword to preserve). What actually
+        // read as "does not auto-equip its sword" is the HAND being empty: the transform apex (Player_Draw) runs
+        // Player_UseItem(ITEM_NONE) then Player_ChangeAge, which rebuild the model group from
+        // heldItemAction==PLAYER_IA_NONE, so FD spawns bare-handed (B shows the sword but the blade is not drawn)
+        // until the ordinary item loop happens to run. Reconcile the held item too so the FD blade is drawn.
+        if (gSaveContext.equips.buttonItems[0] != ITEM_SWORD_DEITY) {
+            gSaveContext.equips.buttonItems[0] = ITEM_SWORD_DEITY;
+            Interface_LoadItemIcon1(play, 0);
+        }
+        // FD (2026-07-12) bug 12: re-draw the FD sword whenever FD's hand doesn't hold it and the player is
+        // genuinely idle/actionable -- NOT just when heldItemAction==PLAYER_IA_NONE. MM keeps FD armed by
+        // forcing the B-slot (above) and letting the vanilla item loop re-equip the blade on return to an
+        // actionable state (RE z_player.c:12962 + the ITEM_LAST_USED exit path). The old NONE-only gate missed
+        // the transitions that leave a NON-none held action in hand: after a bottle swing (heldItemAction is a
+        // BOTTLE_* value), and after ladder/swim (returns to NONE but on frames the old gate still skipped). Gate
+        // on heldItemId!=ITEM_SWORD_DEITY instead, and keep an active bottle uninterrupted via Player_GetBottleHeld<0
+        // (a bottle is a legal FD item -- don't yank a quaff/catch mid-animation).
+        // FD (2026-07-12) #3 sheathe cheat: the per-frame hand re-draw below force-equips the FD blade whenever it
+        // leaves the hand -- which is exactly what makes FD "auto-redraw" the sword the instant you sheathe it. When
+        // the "FD Can Sheathe Sword" cheat is on (2ship parity), skip the re-draw so a deliberate sheathe sticks
+        // (the B-slot force above still keeps ITEM_SWORD_DEITY assigned to B, so it's drawable with a B press like
+        // normal Link). Cheat off (default/MM parity) keeps FD permanently armed.
+        // FD (2026-07-12) #4: also re-draw when the hand isn't actually holding the FD blade (heldItemAction !=
+        // PLAYER_IA_SWORD_BIGGORON), not only when the B-slot id differs. After a WARP SONG (Nocturne, etc.) the
+        // arrival rebuilds the model group empty-handed while the per-frame B-force leaves heldItemId ==
+        // ITEM_SWORD_DEITY, so the old `heldItemId != ITEM_SWORD_DEITY` gate read "already drawn" and never
+        // re-armed FD once control returned. Keying on heldItemAction fixes the missing auto-unsheath after a warp.
+        // FD (2026-07-13): also skip the re-draw while FD is CARRYING an actor (a picked-up bomb flower, bomb, pot,
+        // rock, etc. -- PLAYER_STATE1_CARRYING_ACTOR). Both hands are on the carried object, so force-equipping the
+        // blade here draws the sword straight through the held item (visual bug). Once the item is thrown or dropped
+        // the carry state clears and the auto-draw re-arms FD on the next frame, exactly like the deku-stick/bottle
+        // cases above.
+        // FD (2026-07-14): also skip the auto-draw while CLIMBING a ladder/vine or hanging/climbing a ledge --
+        // otherwise FD draws the blade mid-climb (hands are on the ladder). Like the CARRYING_ACTOR case, the
+        // auto-draw re-arms on the next actionable frame once the climb state clears.
+        if (((this->heldItemId != ITEM_SWORD_DEITY) || (this->heldItemAction != PLAYER_IA_SWORD_BIGGORON)) &&
+            (Player_GetBottleHeld(this) < 0) && (this->heldItemAction != PLAYER_IA_DEKU_STICK) &&
+            !(this->stateFlags1 &
+              (PLAYER_STATE1_IN_CUTSCENE | PLAYER_STATE1_INPUT_DISABLED | PLAYER_STATE1_CARRYING_ACTOR |
+               PLAYER_STATE1_CLIMBING_LADDER | PLAYER_STATE1_HANGING_OFF_LEDGE | PLAYER_STATE1_CLIMBING_LEDGE)) &&
+            !(this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK) && (this->csAction == 0) &&
+            !CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdCanSheathe"), 0) && Player_CanUpdateItems(this)) {
+            Player_UseItem(play, this, ITEM_SWORD_DEITY);
+        }
+
+        // FD (2026-07-12) #4: play the unsheath "shing" whenever the FD blade newly enters the hand. Both the
+        // warp auto-redraw above and a manual B-draw (with the FdCanSheathe cheat on) reach Player_UseItem with
+        // item == heldItemId == ITEM_SWORD_DEITY, so they take the SILENT snap path (Player_InitItemActionWithAnim)
+        // instead of the animated change that fires NA_SE_IT_SWORD_PICKOUT via Player_FinishItemChange -- hence "no
+        // unsheath sound." Detect the not-in-hand -> in-hand transition and play it once. Suppressed during the
+        // transform cutscene (that has its own scream/flash sfx) so the become-FD frame doesn't double up.
+        {
+            static u8 sFdSwordWasDrawn = 0;
+            u8 fdSwordDrawn = (this->heldItemAction == PLAYER_IA_SWORD_BIGGORON);
+            if (fdSwordDrawn && !sFdSwordWasDrawn &&
+                !(this->stateFlags1 & (PLAYER_STATE1_IN_CUTSCENE | PLAYER_STATE1_INPUT_DISABLED)) &&
+                !(this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK)) {
+                Player_PlaySfx(this, NA_SE_IT_SWORD_PICKOUT);
+            }
+            sFdSwordWasDrawn = fdSwordDrawn;
+        }
+    }
+
+    // FD (2026-07-11) bug 4: gate the mask-transform point-light glow on the transform action being active (RE
+    // z_player.c:12930). Player_UpdateTransformLights overrides the color/radius with the keyed values during the
+    // cutscene; forcing radius -1 otherwise guarantees the glow can't stay stuck on after the transform ends (the
+    // action func stops calling Player_UpdateTransformLights, which would otherwise leave a stale radius).
+    if (this->actor.category == ACTORCAT_PLAYER) {
+        if (this->actionFunc == Player_MaskTransformation) {
+            Lights_PointSetColorAndRadius(&this->lightInfo, 255, 255, 255, 60);
+        } else {
+            this->lightInfo.params.point.radius = -1;
+        }
+    }
+
+    // FD (2026-07-13) #7: transformation-mask stuck-safeguard -- Navi prompts a form to turn back into a human at the
+    // hand-picked spots where a form would soft-lock in deep water (RE fd_build z_player.c: the LOCATION_HAS_WATER_-
+    // PROBLEMS macro + the naviWarning block in Player_UpdateCommon). Fires Navi msg 0x71B5 (a two-choice; "Yes"
+    // reverts to human, handled in z_en_elf.c). On by default.
+    //
+    // ★2026-07-13 FIX: an earlier pass over-broadened this to fire on ANY deep-water contact in ANY scene (treading
+    // OR sinking), so it nagged on normal swims (e.g. Zora's Domain) and never cleanly re-prompted. Restore the RE
+    // behavior exactly -- only the four hand-picked locations, gated on the real swim state (PLAYER_STATE1_IN_WATER,
+    // = the RE's PLAYER_STATE1_27), with the once-per-water-entry latch reset the instant you leave the water so
+    // returning to the same spot re-prompts.
+    //
+    // MECHANISM (why the fork must drive naviWarning, not naviTextId): Player_UpdateCommon resets naviTextId to 0
+    // AFTER the action func's talk handler runs, so a direct naviTextId set that isn't consumed the same frame -- the
+    // norm while swimming -- is wiped before Navi speaks. The RE uses the PERSISTENT naviWarning field, re-armed into
+    // naviTextId every frame until a message actually shows. SoH has the field (z64player.h) but never drove it.
+    if (this->actor.category == ACTORCAT_PLAYER) {
+        static u8 sFdWaterWarning = 0;
+        if (this->naviWarning != 0) {
+            // Convert the persistent warning to a FORCED Navi talk each frame; clear it once Navi is speaking.
+            this->naviTextId = -(s16)ABS((s32)this->naviWarning);
+            if (Message_GetState(&play->msgCtx) != TEXT_STATE_NONE) {
+                this->naviWarning = 0;
+            }
+        } else if (this->stateFlags1 & PLAYER_STATE1_IN_WATER) {
+            if (LINK_IS_DEITY && CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.StuckSafeguards"), 1)) {
+                // LOCATION_HAS_WATER_PROBLEMS: Zora's River room 1, Lost Woods, Water Temple room 0 NW quadrant
+                // (x < 536, z < 436), and the underwater grotto (ENTR_GROTTOS_11).
+                s32 hasWaterProblems =
+                    ((play->sceneNum == SCENE_ZORAS_RIVER) && (play->roomCtx.curRoom.num == 1)) ||
+                    (play->sceneNum == SCENE_LOST_WOODS) ||
+                    ((play->sceneNum == SCENE_WATER_TEMPLE) && (play->roomCtx.curRoom.num == 0) &&
+                     (this->actor.world.pos.x < 536.0f) && (this->actor.world.pos.z < 436.0f)) ||
+                    (gSaveContext.entranceIndex == ENTR_GROTTOS_11);
+                if (hasWaterProblems && (sFdWaterWarning == 0)) {
+                    this->naviWarning = 0x71B5; // persistent -> re-armed into naviTextId above every frame
+                    sFdWaterWarning = 1;
+                }
+            }
+        } else {
+            sFdWaterWarning = 0; // left the water -> re-arm so returning to a problem spot prompts again
+        }
+    }
 
     if (this->unk_A86 < 0) {
         this->unk_A86++;
@@ -11807,6 +13366,12 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
     Player_UpdateInterface(play, this);
     Player_UpdateZTargeting(this, play);
 
+    // FD (2026-07-11): emit Fierce Deity blade sparkles whenever the FD sword is beam-ready (RE
+    // z_player.c:11234). CanUseSwordBeams already gates on FD/FD-sword + Z-targeting.
+    if ((this->actor.category == ACTORCAT_PLAYER) && (Player_CanUseSwordBeams(this) == 1)) {
+        Player_FierceDeityParticles(this, play);
+    }
+
     if (this->heldItemAction == PLAYER_IA_DEKU_STICK &&
         GameInteractor_Should(VB_DEKU_STICK_BE_ON_FIRE, this->unk_860 != 0)) {
         Player_UpdateBurningDekuStick(play, this);
@@ -11830,7 +13395,7 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
     }
 
     if (this->stateFlags2 & PLAYER_STATE2_PAUSE_MOST_UPDATING) {
-        if (!(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+        if (!(this->actor.bgCheckFlags & 1)) {
             Player_ZeroSpeedXZ(this);
             Actor_MoveXZGravity(&this->actor);
         }
@@ -11850,7 +13415,7 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
                 }
             } else {
                 if (this->stateFlags1 & PLAYER_STATE1_IN_WATER) {
-                    if ((this->prevBoots == PLAYER_BOOTS_IRON) || (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+                    if ((this->prevBoots == PLAYER_BOOTS_IRON) || (this->actor.bgCheckFlags & 1)) {
                         func_8083D36C(play, this);
                         this->stateFlags2 &= ~PLAYER_STATE2_UNDERWATER;
                     }
@@ -11878,7 +13443,7 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
         }
 
         Math_ScaledStepToS(&this->unk_6C2, 0, 400);
-        FaceChange_UpdateBlinking(this->unk_3A8, 20, 80, 6);
+        func_80032CB4(this->unk_3A8, 20, 80, 6);
 
         this->actor.shape.face = this->unk_3A8[0] + ((play->gameplayFrames & 32) ? 0 : 3);
 
@@ -11891,8 +13456,7 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
         }
 
         if (!(this->skelAnime.movementFlags & 0x80)) {
-            if (((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && (sFloorType == 5) &&
-                 (this->currentBoots != PLAYER_BOOTS_IRON)) ||
+            if (((this->actor.bgCheckFlags & 1) && (sFloorType == 5) && (this->currentBoots != PLAYER_BOOTS_IRON)) ||
                 ((this->currentBoots == PLAYER_BOOTS_HOVER || GameInteractor_GetSlipperyFloorActive()) &&
                  !(this->stateFlags1 & (PLAYER_STATE1_IN_WATER | PLAYER_STATE1_IN_CUTSCENE)))) {
                 f32 sp70 = this->linearVelocity;
@@ -12001,8 +13565,7 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
                     (PLAYER_STATE1_HANGING_OFF_LEDGE | PLAYER_STATE1_CLIMBING_LEDGE | PLAYER_STATE1_CLIMBING_LADDER)) {
                     func_80832440(play, this);
                     func_80837B9C(this, play);
-                } else if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
-                           (this->stateFlags1 & PLAYER_STATE1_IN_WATER)) {
+                } else if ((this->actor.bgCheckFlags & 1) || (this->stateFlags1 & PLAYER_STATE1_IN_WATER)) {
                     func_80836448(play, this,
                                   func_808332B8(this)           ? &gPlayerAnim_link_swimer_swim_down
                                   : (this->bodyShockTimer != 0) ? &gPlayerAnim_link_normal_electric_shock_end
@@ -12073,6 +13636,31 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
         sInvWaterSpeedFactor = 1.0f / sWaterSpeedFactor;
         sUseHeldItem = sHeldItemButtonIsHeldDown = 0;
         sSavedCurrentMask = this->currentMask;
+
+        // FD (2026-07-13): door-sink fix. While the door-open action runs, drive FD through the ADULT age-properties
+        // (unk_08 = 1.0) so the door animation's baked vertical root motion isn't over-scaled by FD's 1.5x height
+        // factor and dragged into the floor. This is the ONLY thing needed for the sink -- the draw scale stays at
+        // FD's normal 0.015 (which is ~Adult Link height for FD's smaller-per-unit model; 0.01 would render him at
+        // Young Link height). Evaluated every frame BEFORE the action func's root motion; the moment the door action
+        // ends this restores the deity age-properties. FD-only, always on (toggle retired). (Door setup mirrors this
+        // so the initial RESET_BY_AGE baseline is also computed with adult scaling, and forces the adult door
+        // animation.)
+        // FD (2026-07-14): the same 1.5x vertical root-motion over-scale that caused the door-sink also breaks
+        // ladder/ledge climbing -- FD's climb anims + baked per-rung translations are byte-identical to ADULT's,
+        // but DEITY's unk_08 (1.5) multiplies the vertical motion so he sails PAST the ladder top (top-out check
+        // unk_40 / dismount offset unk_3C are calibrated for 1.0) and then drops. Drive FD through the ADULT
+        // age-properties during the climb action funcs too (ladder/vine loop 8084BF1C, ledge climb-up 8084BDFC),
+        // exactly as the door action does -- faithful since the climb anims are already adult's.
+        if (gSaveContext.linkAge == LINK_AGE_DEITY) {
+            if (this->actionFunc == Player_Action_80845EF8 || // door open
+                this->actionFunc == Player_Action_8084BF1C || // ladder / vine climb loop
+                this->actionFunc == Player_Action_8084BDFC    // ledge climb-up / top-out
+                /* && CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.DoorScaleFix"), 1) */) {
+                this->ageProperties = &sAgeProperties[LINK_AGE_ADULT];
+            } else {
+                this->ageProperties = &sAgeProperties[LINK_AGE_DEITY];
+            }
+        }
 
         if (GameInteractor_Should(VB_EXECUTE_PLAYER_ACTION_FUNC, !(this->stateFlags3 & PLAYER_STATE3_PAUSE_ACTION_FUNC),
                                   this, input)) {
@@ -12249,11 +13837,21 @@ void Player_Update(Actor* thisx, PlayState* play) {
 
     // Make Link normal size when going through doors and crawlspaces and when climbing ladders.
     // Otherwise Link can glitch out, being in unloaded rooms or falling OoB.
+    // FD (2026-07-11): "normal size" for Fierce Deity is the DEITY scale, not 0.01 (the RE applies it
+    // unconditionally in Player_Draw @0x80845df8). Without this, FD shrinks to 0.01 during door-transition
+    // cutscenes / ladders / crawlspaces ("small until moving").
+    // FD (2026-07-12): use 2ship's EXACT 0.015f (mm/src/code/z_player_lib.c:646, func_80123140/Player_SetBootData),
+    // not the aegiker OoT-RE's rounded 0.0149 -- the model is 2ship's, so match its native scale.
     if (this->stateFlags1 & PLAYER_STATE1_CLIMBING_LADDER || this->stateFlags1 & PLAYER_STATE1_IN_CUTSCENE ||
         this->stateFlags2 & PLAYER_STATE2_CRAWLING) {
-        this->actor.scale.x = 0.01f;
-        this->actor.scale.y = 0.01f;
-        this->actor.scale.z = 0.01f;
+        // FD (2026-07-13): keep FD at his normal 0.015 during doors/ladders/crawlspaces -- for FD's smaller-per-unit
+        // model 0.015 is ~Adult Link height, while 0.01 renders him at Young Link height. The door-sink is fixed
+        // purely by the adult age-properties swap in the action-func hook above (unk_08 = 1.0, no root-motion
+        // over-scale), NOT by shrinking him, so no door-specific scale override is applied here anymore.
+        f32 fdNormalScale = (gSaveContext.linkAge == LINK_AGE_DEITY) ? 0.015f : 0.01f;
+        this->actor.scale.x = fdNormalScale;
+        this->actor.scale.y = fdNormalScale;
+        this->actor.scale.z = fdNormalScale;
     } else {
         switch (GameInteractor_GetLinkSize()) {
             case GI_LINK_SIZE_RESET:
@@ -12284,9 +13882,21 @@ void Player_Update(Actor* thisx, PlayState* play) {
                 break;
             case GI_LINK_SIZE_NORMAL:
             default:
+                // FD (2026-07-12): FD draws at 2ship's exact 0.015f (mm z_player_lib.c:646, Player_SetBootData) for
+                // correct stature; stature comes from the model, not the scale. ONLY override for DEITY -- vanilla
+                // left this case an empty `break;` (child/adult scale untouched during normal gameplay), so writing
+                // 0.01 for non-deity every frame would be a (benign but real) deviation. Preserve the vanilla no-op.
+                if (gSaveContext.linkAge == LINK_AGE_DEITY) {
+                    this->actor.scale.x = this->actor.scale.y = this->actor.scale.z = 0.015f;
+                }
                 break;
         }
     }
+
+    // FD (2026-07-12): grounding is now handled faithfully at the source -- the RE root-limb scale gate
+    // (z_player_lib.c Player_OverrideLimbDrawGameplayCommon) excludes DEITY from the 0.64 pelvis shrink,
+    // so FD stands at shape.yOffset==0 exactly like the RE. The old CVar-tunable shape.yOffset=900
+    // compensation hack (and its sFdYOffsetWasDeity revert bookkeeping) has been removed.
 
     // Don't apply gravity when Link is in water, otherwise
     // it makes him sink instead of float.
@@ -12307,7 +13917,7 @@ void Player_Update(Actor* thisx, PlayState* play) {
         Player* player = GET_PLAYER(play);
         player->pushedSpeed = 3.0f;
         // Play fan sound (too annoying)
-        // Actor_PlaySfx_Flagged(&player->actor, NA_SE_EV_WIND_TRAP - SFX_FLAG);
+        // func_8002F974(&player->actor, NA_SE_EV_WIND_TRAP - SFX_FLAG);
     }
 
     GameInteractor_ExecuteOnPlayerUpdate();
@@ -12378,8 +13988,10 @@ void Player_DrawGameplay(PlayState* play, Player* this, s32 lod, Gfx* cullDList,
             Matrix_Pop();
     }
 
-    if ((this->currentBoots == PLAYER_BOOTS_HOVER) && !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) &&
-        !(this->stateFlags1 & PLAYER_STATE1_ON_HORSE) && (this->hoverBootsTimer != 0)) {
+    if ((this->currentBoots == PLAYER_BOOTS_HOVER ||
+         (CVarGetInteger(CVAR_ENHANCEMENT("IvanCoopModeEnabled"), 0) && this->ivanFloating)) &&
+        !(this->actor.bgCheckFlags & 1) && !(this->stateFlags1 & PLAYER_STATE1_ON_HORSE) &&
+        (this->hoverBootsTimer != 0)) {
         s32 sp5C;
         s32 hoverBootsTimer = this->hoverBootsTimer;
 
@@ -12424,6 +14036,41 @@ void Player_Draw(Actor* thisx, PlayState* play2) {
     Vec3f pos;
     Vec3s rot;
     f32 scale;
+
+    // FD (2026-07-11): transform commit at the fully-white fade apex (RE z_player.c:11851). While a transform
+    // fade runs (play->ageChangeFlag >= 0) the z_play.c driver ramps ageChangeFadeAlpha to its apex; there, with
+    // the screen fully white, swap Link's age/skeleton and fold in the FD B-item stash/restore, then flip
+    // ageChangeFlag negative so the fade reverses back out.
+    if (this->actor.category == ACTORCAT_PLAYER) {
+        if (play->ageChangeFadeAlpha >= 255 + TRANSFORM_EXTRA_FADE_FRAMES) {
+            if (play->ageChangeFlag >= 0) {
+                if (play->ageChangeTimer == 0) {
+                    // Skip drawing Link for one frame so the model swap happens invisibly.
+                    Player_UseItem(play, this, ITEM_NONE);
+                    play->ageChangeTimer = 1;
+                    return;
+                } else {
+                    // Fold the Fierce Deity B-item stash/restore into the apex (was the immediate-swap logic).
+                    if ((play->ageChangeFlag == LINK_AGE_DEITY) && !LINK_IS_DEITY) {
+                        gSaveContext.ship.fierceDeityPreviousForm = gSaveContext.linkAge;
+                        gSaveContext.ship.fierceDeityBButtonMemory = gSaveContext.equips.buttonItems[0];
+                        gSaveContext.equips.buttonItems[0] = ITEM_SWORD_DEITY;
+                    } else if ((play->ageChangeFlag != LINK_AGE_DEITY) && LINK_IS_DEITY) {
+                        gSaveContext.equips.buttonItems[0] = gSaveContext.ship.fierceDeityBButtonMemory;
+                        gSaveContext.ship.fierceDeityPreviousForm = 0xFF;
+                    }
+                    Player_UseItem(play, this, ITEM_NONE);
+                    Player_ChangeAge(this, play, play->ageChangeFlag); // reloads skeleton + Player_SetEquipmentData
+                    Interface_LoadItemIcon1(play, 0);
+                    play->ageChangeFlag = -1; // fade back out
+                }
+            }
+        }
+        if (DECR(play->ageChangeTimer) != 0) {
+            Player_UseItem(play, this, ITEM_NONE);
+            return;
+        }
+    }
 
     if (LINK_AGE_IN_YEARS == YEARS_CHILD) {
         pos.x = 2.0f;
@@ -12552,6 +14199,12 @@ void Player_Destroy(Actor* thisx, PlayState* play) {
     Magic_Reset(play);
 
     gSaveContext.linkAge = play->linkAgeOnLoad;
+
+    // FD (2026-07-11) Task 1: remove the transform point-light glow (mirror of the Player_Init insert).
+    if (this->lightNode != NULL) {
+        LightContext_RemoveLight(play, &play->lightCtx, this->lightNode);
+        this->lightNode = NULL;
+    }
 
     ResourceMgr_UnregisterSkeleton(&this->skelAnime);
     ResourceMgr_UnregisterSkeleton(&this->upperSkelAnime);
@@ -12688,24 +14341,59 @@ void func_8084AEEC(Player* this, f32* arg1, f32 arg2, s16 arg3) {
     f32 temp1;
     f32 temp2;
 
-    temp1 = this->skelAnime.curFrame - 10.0f;
+    // #region SOH [Enhancement]
+    f32 swimMod = 1.0f;
 
-    temp2 = (R_RUN_SPEED_LIMIT / 100.0f) * 0.8f;
-    GameInteractor_Should(VB_PLAYER_MODIFY_SWIM_SPEED, true, this, &temp2, sControlInput != NULL);
-    if (*arg1 > temp2) {
-        *arg1 = temp2;
-    }
+    if (CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f) != 1.0f) {
+        if (CVarGetInteger(CVAR_CHEAT("SpeedModifier.SpeedToggle"), 0) == 1) {
+            if (gWalkSpeedToggle) {
+                swimMod *= CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f);
+            }
+            // sControlInput is NULL to prevent inputs while surfacing after obtaining an underwater item so we want to
+            // ignore it for that case
+        } else if (sControlInput != NULL) {
+            const s32 mod1Mask = CVarGetInteger(CVAR_CHEAT("SpeedModifier.Btn"), BTN_CUSTOM_MODIFIER1);
 
-    if ((0.0f < temp1) && (temp1 < 10.0f)) {
-        temp1 *= 6.0f;
+            if (mod1Mask != 0 && CHECK_BTN_ALL(sControlInput->cur.button, mod1Mask)) {
+                swimMod *= CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f);
+            }
+        }
+        temp1 = this->skelAnime.curFrame - 10.0f;
+
+        temp2 = (R_RUN_SPEED_LIMIT / 100.0f) * 0.8f * swimMod;
+        if (*arg1 > temp2) {
+            *arg1 = temp2;
+        }
+
+        if ((0.0f < temp1) && (temp1 < 10.0f)) {
+            temp1 *= 6.0f;
+        } else {
+            temp1 = 0.0f;
+            arg2 = 0.0f;
+        }
+
+        Math_AsymStepToF(arg1, arg2 * 0.8f * swimMod, temp1, (fabsf(*arg1) * 0.02f) + 0.05f);
+        Math_ScaledStepToS(&this->yaw, arg3, 1600);
+        // #endregion
     } else {
-        temp1 = 0.0f;
-        arg2 = 0.0f;
-    }
 
-    GameInteractor_Should(VB_PLAYER_MODIFY_SWIM_SPEED, true, this, &arg2, sControlInput != NULL);
-    Math_AsymStepToF(arg1, arg2 * 0.8f, temp1, (fabsf(*arg1) * 0.02f) + 0.05f);
-    Math_ScaledStepToS(&this->yaw, arg3, 1600);
+        temp1 = this->skelAnime.curFrame - 10.0f;
+
+        temp2 = (R_RUN_SPEED_LIMIT / 100.0f) * 0.8f;
+        if (*arg1 > temp2) {
+            *arg1 = temp2;
+        }
+
+        if ((0.0f < temp1) && (temp1 < 10.0f)) {
+            temp1 *= 6.0f;
+        } else {
+            temp1 = 0.0f;
+            arg2 = 0.0f;
+        }
+
+        Math_AsymStepToF(arg1, arg2 * 0.8f, temp1, (fabsf(*arg1) * 0.02f) + 0.05f);
+        Math_ScaledStepToS(&this->yaw, arg3, 1600);
+    }
 }
 
 // #region SOH [Enhancement]
@@ -13559,7 +15247,7 @@ void Player_Action_8084CC98(Player* this, PlayState* play) {
         }
 
         if (LinkAnimation_OnFrame(&this->skelAnime, arr[1])) {
-            Actor_RequestHorseCameraSetting(play, this);
+            func_8002DE74(play, this);
             Player_PlaySfx(this, NA_SE_PL_SIT_ON_HORSE);
             return;
         }
@@ -13567,7 +15255,7 @@ void Player_Action_8084CC98(Player* this, PlayState* play) {
         return;
     }
 
-    Actor_RequestHorseCameraSetting(play, this);
+    func_8002DE74(play, this);
     this->skelAnime.prevTransl = D_8085499C;
 
     if ((rideActor->animationIdx != this->av2.actionVar2) &&
@@ -13734,7 +15422,7 @@ void Player_Action_8084D3E4(Player* this, PlayState* play) {
             gSaveContext.horseData.angle = rideActor->actor.shape.rot.y;
         }
     } else {
-        Camera_RequestSetting(Play_GetCamera(play, 0), CAM_SET_NORMAL0);
+        Camera_ChangeSetting(Play_GetCamera(play, 0), CAM_SET_NORMAL0);
 
         if (this->mountSide < 0) {
             D_808549C4[0].data = ANIMSFX_DATA(ANIMSFX_TYPE_LANDING, 40);
@@ -13782,7 +15470,7 @@ void Player_Action_8084D610(Player* this, PlayState* play) {
             sp34 = 0.0f;
             sp32 = this->actor.shape.rot.y;
 
-            if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+            if (this->actor.bgCheckFlags & 1) {
                 func_8083A098(this, GET_PLAYER_ANIM(PLAYER_ANIMGROUP_short_landing, this->modelAnimType), play);
                 Player_PlayLandingSfx(this);
             }
@@ -13913,11 +15601,14 @@ void func_8084DBC4(PlayState* play, Player* this, f32 arg2) {
 
     Player_GetMovementSpeedAndYaw(this, &sp2C, &sp2A, SPEED_MODE_LINEAR, play);
     func_8084AEEC(this, &this->linearVelocity, sp2C * 0.5f, sp2A);
-    // #region SOH [Enhancement]
-    // Use swim-mod-free variant for y (surfacing) velocity so an active swim speed modifier can't push Link into air.
-    // This is identical to func_8084AEEC when no modifier active (swimMod == 1.0f), thus safe to always use.
-    SurfaceWithoutSwimMod(this, &this->actor.velocity.y, arg2, this->yaw);
-    // #endregion
+    // Original implementation of func_8084AEEC (SurfaceWithoutSwimMod) to prevent velocity increases via swim mod which
+    // push Link into the air #region SOH [Enhancement]
+    if (CVarGetFloat(CVAR_CHEAT("SpeedModifier.Value"), 1.0f) != 1.0f) {
+        SurfaceWithoutSwimMod(this, &this->actor.velocity.y, arg2, this->yaw);
+        // #endregion
+    } else {
+        func_8084AEEC(this, &this->actor.velocity.y, arg2, this->yaw);
+    }
 }
 
 void Player_Action_8084DC48(Player* this, PlayState* play) {
@@ -13950,8 +15641,7 @@ void Player_Action_8084DC48(Player* this, PlayState* play) {
             this->unk_6C2 = 16000;
 
             if (CHECK_BTN_ALL(sControlInput->cur.button, BTN_A) && !Player_ActionHandler_2(this, play) &&
-                !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) &&
-                (this->actor.yDistToWater < D_80854784[CUR_UPG_VALUE(UPG_SCALE)])) {
+                !(this->actor.bgCheckFlags & 1) && (this->actor.yDistToWater < D_80854784[CUR_UPG_VALUE(UPG_SCALE)])) {
                 func_8084DBC4(play, this, -2.0f);
             } else {
                 this->av1.actionVar1++;
@@ -13990,6 +15680,9 @@ void func_8084DF6C(PlayState* play, Player* this) {
     this->stateFlags1 &= ~(PLAYER_STATE1_GETTING_ITEM | PLAYER_STATE1_CARRYING_ACTOR);
     this->getItemId = GI_NONE;
     this->getItemEntry = (GetItemEntry)GET_ITEM_NONE;
+    // FD (2026-07-12) ★AUDIO FIX v4: the FD mask-get fanfare hijacked SEQ_PLAYER_BGM_MAIN; the get-item hold is over,
+    // so restore the pre-get scene BGM (no-op unless a custom FD fanfare/transform seq was saved).
+    Player_RestoreFdTransformBgm();
     func_8005B1A4(Play_GetCamera(play, 0));
 }
 
@@ -14031,10 +15724,7 @@ s32 func_8084DFF4(PlayState* play, Player* this) {
                     gSaveContext.bgsFlag = true;
                     gSaveContext.swordHealth = 8;
                 }
-
-                // Prevent OOB Items from crashing game.
-                if (giEntry.itemId != ITEM_NONE)
-                    Item_Give(play, giEntry.itemId);
+                Item_Give(play, giEntry.itemId);
             } else {
                 Randomizer_Item_Give(play, giEntry);
             }
@@ -14043,7 +15733,12 @@ s32 func_8084DFF4(PlayState* play, Player* this) {
 
         // Use this if we do have a getItemEntry
         if (giEntry.modIndex == MOD_NONE) {
-            if (IS_RANDO) {
+            // FD (2026-07-12) #1: the transformation mask plays its own custom "Get a Mask" fanfare from the MM OST.
+            // ★AUDIO FIX v6: play the WAV directly via the audio-thread mixer (FdAudio_PlayOneShot) -- the streamed-
+            // sequence path (any player) was silent. This mixes over whatever BGM is playing; no eviction/restore.
+            if (giEntry.itemId == ITEM_MASK_DEITY) {
+                FdAudio_PlayOneShot("custom/samples/fd/Get_A_Mask.wav");
+            } else if (IS_RANDO) {
                 Audio_PlayFanfare_Rando(giEntry);
             } else if (((giEntry.itemId >= ITEM_RUPEE_GREEN) && (giEntry.itemId <= ITEM_RUPEE_RED)) ||
                        ((giEntry.itemId >= ITEM_RUPEE_PURPLE) && (giEntry.itemId <= ITEM_RUPEE_GOLD)) ||
@@ -14099,15 +15794,13 @@ s32 func_8084DFF4(PlayState* play, Player* this) {
         play->msgCtx.msgMode = MSGMODE_TEXT_DONE;
     } else {
         if (Message_GetState(&play->msgCtx) == TEXT_STATE_CLOSING) {
-            if (this->getItemId == GI_GAUNTLETS_SILVER) {
-                if (GameInteractor_Should(VB_PLAY_NABOORU_CAPTURED_CS, true)) {
-                    play->nextEntranceIndex = ENTR_DESERT_COLOSSUS_EAST_EXIT;
-                    play->transitionTrigger = TRANS_TRIGGER_START;
-                    gSaveContext.nextCutsceneIndex = 0xFFF1;
-                    play->transitionType = TRANS_TYPE_SANDSTORM_END;
-                    this->stateFlags1 &= ~PLAYER_STATE1_IN_CUTSCENE;
-                    Player_TryCsAction(play, NULL, 8);
-                }
+            if (GameInteractor_Should(VB_PLAY_NABOORU_CAPTURED_CS, this->getItemId == GI_GAUNTLETS_SILVER)) {
+                play->nextEntranceIndex = ENTR_DESERT_COLOSSUS_EAST_EXIT;
+                play->transitionTrigger = TRANS_TRIGGER_START;
+                gSaveContext.nextCutsceneIndex = 0xFFF1;
+                play->transitionType = TRANS_TYPE_SANDSTORM_END;
+                this->stateFlags1 &= ~PLAYER_STATE1_IN_CUTSCENE;
+                Player_TryCsAction(play, NULL, 8);
             }
 
             // Set unk_862 to 0 early to not have the game draw non-custom colored models for a split second.
@@ -14146,7 +15839,7 @@ void Player_Action_8084E1EC(Player* this, PlayState* play) {
         if ((this->stateFlags1 & PLAYER_STATE1_GETTING_ITEM) && LinkAnimation_OnFrame(&this->skelAnime, 10.0f)) {
             func_808332F4(this, play);
             func_80832340(play, this);
-            Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_8);
+            func_80835EA4(play, 8);
         } else if (LinkAnimation_OnFrame(&this->skelAnime, 5.0f)) {
             Player_PlayVoiceSfx(this, NA_SE_VO_LI_BREATH_DRINK);
         }
@@ -14289,7 +15982,6 @@ void Player_Action_8084E6D4(Player* this, PlayState* play) {
             }
         } else {
             Player_FinishAnimMovement(this);
-
             if ((this->getItemId == GI_ICE_TRAP && !IS_RANDO) ||
                 (IS_RANDO && (this->getItemId == RG_ICE_TRAP || this->getItemEntry.getItemId == RG_ICE_TRAP))) {
                 this->stateFlags1 &= ~(PLAYER_STATE1_GETTING_ITEM | PLAYER_STATE1_CARRYING_ACTOR);
@@ -14305,7 +15997,7 @@ void Player_Action_8084E6D4(Player* this, PlayState* play) {
                     func_8083C0E8(this, play);
                 } else {
                     this->actor.colChkInfo.damage = 0;
-                    func_80837C0C(play, this, PLAYER_HIT_RESPONSE_FROZEN, 0.0f, 0.0f, 0, 20);
+                    func_80837C0C(play, this, PLAYER_HIT_RESPONSE_ICE_TRAP, 0.0f, 0.0f, 0, 20);
                 }
                 return;
             }
@@ -14317,7 +16009,7 @@ void Player_Action_8084E6D4(Player* this, PlayState* play) {
             }
 
             this->av2.actionVar2 = 2;
-            Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_9);
+            func_80835EA4(play, 9);
         }
     } else {
         if (this->av2.actionVar2 == 0) {
@@ -14515,7 +16207,7 @@ void Player_Action_SwingBottle(Player* this, PlayState* play) {
                     Player_UpdateBottleHeld(play, this, catchInfo->itemId, ABS(catchInfo->itemAction));
                     if (!CVarGetInteger(CVAR_ENHANCEMENT("FastBottles"), 0)) {
                         Player_AnimPlayOnceAdjusted(play, this, swingEntry->catchAnimation);
-                        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_4);
+                        func_80835EA4(play, 4);
                     }
                 }
             }
@@ -14698,7 +16390,7 @@ void Player_Action_SlideOnSlope(Player* this, PlayState* play) {
         xzSpeedIncrStep = SQ(xzSpeedTarget) * 0.015f;
         xzSpeedDecrStep = slopeNormal.y * 0.01f;
 
-        if (SurfaceType_GetFloorEffect(&play->colCtx, floorPoly, this->actor.floorBgId) != 1) {
+        if (SurfaceType_GetSlope(&play->colCtx, floorPoly, this->actor.floorBgId) != 1) {
             xzSpeedTarget = 0;
             xzSpeedDecrStep = slopeNormal.y * 10.0f;
         }
@@ -14724,7 +16416,7 @@ void Player_Action_SlideOnSlope(Player* this, PlayState* play) {
     }
 }
 
-void Player_Action_WaitForCutscene(Player* this, PlayState* play) {
+void Player_Action_8084F608(Player* this, PlayState* play) {
     if ((DECR(this->av2.actionVar2) == 0) && Player_StartCsAction(play, this)) {
         func_80852280(play, this, NULL);
         Player_SetupAction(play, this, Player_Action_CsAction, 0);
@@ -14733,7 +16425,7 @@ void Player_Action_WaitForCutscene(Player* this, PlayState* play) {
 }
 
 void Player_Action_8084F698(Player* this, PlayState* play) {
-    Player_SetupAction(play, this, Player_Action_WaitForCutscene, 0);
+    Player_SetupAction(play, this, Player_Action_8084F608, 0);
     this->av2.actionVar2 = 40;
     Actor_Spawn(&play->actorCtx, play, ACTOR_DEMO_KANKYO, 0.0f, 0.0f, 0.0f, 0, 0, 0, 0x10);
 }
@@ -14747,7 +16439,7 @@ void Player_Action_8084F710(Player* this, PlayState* play) {
     } else if (sYDistToFloor < 150.0f) {
         if (LinkAnimation_Update(play, &this->skelAnime)) {
             if (this->av2.actionVar2 == 0) {
-                if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+                if (this->actor.bgCheckFlags & 1) {
                     this->skelAnime.endFrame = this->skelAnime.animLength - 1.0f;
                     Player_PlayLandingSfx(this);
                     this->av2.actionVar2 = 1;
@@ -14875,7 +16567,7 @@ void Player_Action_8084FBF4(Player* this, PlayState* play) {
     }
 
     this->bodyShockTimer = 40;
-    Actor_PlaySfx_Flagged2(&this->actor, NA_SE_VO_LI_TAKEN_AWAY - SFX_FLAG + this->ageProperties->unk_92);
+    func_8002F8F0(&this->actor, NA_SE_VO_LI_TAKEN_AWAY - SFX_FLAG + this->ageProperties->unk_92);
 }
 
 /**
@@ -15035,7 +16727,34 @@ s32 Player_ActionHandler_7(Player* this, PlayState* play) {
 
             if (sp24 >= PLAYER_MWA_SPIN_ATTACK_1H) {
                 this->stateFlags2 |= PLAYER_STATE2_SPIN_ATTACKING;
-                func_80837530(play, this, 0);
+                // FD (2026-07-12) #6 MM PARITY: in MM, FD's stick-rotate quickspin is a PLAIN MAGICLESS blade sweep --
+                // Player_ActionChange_7 -> func_808332A0(.., isSwordBeam=false) never spawns EN_M_THUNDER for a
+                // non-human form (mm z_player.c:5164 `isSwordBeam || transformation==HUMAN`). The RE (aegiker) and
+                // this fork spawned the level-1 magic spin DISK for FD unconditionally (glow + Magic_Reset) -- a
+                // divergence from real MM/2ship. Gate the disk spawn: default (cheat off) = magicless MM behavior;
+                // the "FD Magic Spin" cheat restores the RE/aegiker magic disk. Non-FD is unaffected. The spin
+                // animation + damage + PLAYER_STATE2_SPIN_ATTACKING already ran above, so the swing still happens.
+                if (!LINK_IS_DEITY || CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdMagicSpin"), 0)) {
+                    func_80837530(play, this, 0, 0); // charged spin swing: level (no target pitch)
+                }
+                return 1;
+            } else if ((Player_CanUseSwordBeams(this) == 1) && (gSaveContext.magic != 0) &&
+                       Magic_RequestChange(play, 1, MAGIC_CONSUME_DEITY_BEAM)) {
+                // FD (2026-07-11): Fierce Deity sword beam on a regular (non-spin) swing (RE z_player.c:16411).
+                // Pre-gate on magic != 0 so a magicless swing is silent (no error tone), then DEITY_BEAM
+                // drains exactly 1. func_80837530(.., 0x200) spawns EN_M_THUNDER with the sword-beam bit.
+                // FD (2026-07-12) MM PARITY: aim the beam at the Z-targeted enemy's elevation. MM computes
+                // pitch = Math_Vec3f_Pitch(waist, focusActor->focus.pos) at spawn (mm z_player.c:5164); no target
+                // -> 0 (level). This makes FD's beams travel up/down toward a target above/below (Gyorg, Majora's
+                // Incarnation) instead of always horizontal. The beam does not home -- pitch is fixed at spawn.
+                this->stateFlags2 |= PLAYER_STATE2_SPIN_ATTACKING;
+                {
+                    s16 beamPitch = (this->focusActor != NULL)
+                                        ? Math_Vec3f_Pitch(&this->bodyPartsPos[PLAYER_BODYPART_WAIST],
+                                                           &this->focusActor->focus.pos)
+                                        : 0;
+                    func_80837530(play, this, 0x200, beamPitch);
+                }
                 return 1;
             }
         } else {
@@ -15980,8 +17699,7 @@ void func_80851BE8(PlayState* play, Player* this, CsCmdActorCue* cue) {
 }
 
 void func_80851CA4(PlayState* play, Player* this, CsCmdActorCue* cue) {
-    if (LinkAnimation_Update(play, &this->skelAnime) && (this->av2.actionVar2 == 0) &&
-        (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
+    if (LinkAnimation_Update(play, &this->skelAnime) && (this->av2.actionVar2 == 0) && (this->actor.bgCheckFlags & 1)) {
         Player_AnimPlayOnce(play, this, &gPlayerAnim_link_normal_back_downB);
         this->av2.actionVar2 = 1;
     }
@@ -16594,6 +18312,6 @@ void Player_StartTalking(PlayState* play, Actor* actor) {
 
     if ((this->naviActor == this->talkActor) && ((this->talkActor->textId & 0xFF00) != 0x200)) {
         this->naviActor->flags |= ACTOR_FLAG_TALK;
-        Player_SetTurnAroundCamera(play, CAM_ITEM_TYPE_11);
+        func_80835EA4(play, 0xB);
     }
 }

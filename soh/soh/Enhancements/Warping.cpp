@@ -1,11 +1,9 @@
-#include <ship/Context.h>
-#include <ship/config/Config.h>
+#include <libultraship/bridge.h>
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/ShipInit.hpp"
 #include "functions.h"
 #include "soh/SohGui/MenuTypes.h"
-#include "soh/SohGui/UIWidgets.hpp"
 #include "soh/util.h"
 
 extern "C" {
@@ -57,7 +55,7 @@ void Warp(WarpPoint& warpPoint) {
         gSaveContext.magicCapacity = 0;
         gSaveContext.magicLevel = gSaveContext.magic;
         gSaveContext.fileNum = 0xFF;
-        gSaveContext.sceneLayer = 0;
+        gSaveContext.sceneSetupIndex = 0;
         gSaveContext.cutsceneIndex = 0;
         gSaveContext.linkAge = 0;
         gSaveContext.nightFlag = 0;
@@ -67,7 +65,7 @@ void Warp(WarpPoint& warpPoint) {
         for (int buttonIndex = 0; buttonIndex < ARRAY_COUNT(gSaveContext.buttonStatus); buttonIndex++) {
             gSaveContext.buttonStatus[buttonIndex] = BTN_ENABLED;
         }
-        gSaveContext.nextHudVisibilityMode = gSaveContext.hudVisibilityMode = gSaveContext.hudVisibilityModeTimer = 0;
+        gSaveContext.unk_13E8 = gSaveContext.unk_13EA = gSaveContext.unk_13EC = 0;
         gSaveContext.forceRisingButtonAlphas = 0;
         Audio_QueueSeqCmd(SEQ_PLAYER_BGM_MAIN << 24 | NA_BGM_STOP);
         gSaveContext.entranceIndex = warpPoint.entranceId;

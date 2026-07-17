@@ -278,6 +278,40 @@ f32 Math_Vec3f_DistXZ(Vec3f* a, Vec3f* b) {
     return sqrtf(SQ(dx) + SQ(dz));
 }
 
+// FD (2026-07-11): generic MM Vec3f helpers (RE z_lib.c:276-311), ported for Player_FierceDeityParticles.
+void Math_Vec3f_ScaleAndStore(Vec3f* vec, f32 scale, Vec3f* dest) {
+    dest->x = vec->x * scale;
+    dest->y = vec->y * scale;
+    dest->z = vec->z * scale;
+}
+
+void Math_Vec3f_SumScaled(Vec3f* a, Vec3f* b, f32 scale, Vec3f* dest) {
+    dest->x = b->x * scale + a->x;
+    dest->y = b->y * scale + a->y;
+    dest->z = b->z * scale + a->z;
+}
+
+void Math_Vec3f_AddRand(Vec3f* orig, f32 scale, Vec3f* dest) {
+    dest->x = Rand_CenteredFloat(scale) + orig->x;
+    dest->y = Rand_CenteredFloat(scale) + orig->y;
+    dest->z = Rand_CenteredFloat(scale) + orig->z;
+}
+
+void Math_Vec3f_DistXYZAndStoreNormDiff(Vec3f* a, Vec3f* b, f32 scale, Vec3f* dest) {
+    f32 diff = Math_Vec3f_DistXYZAndStoreDiff(a, b, dest);
+    f32 normScale;
+
+    if (diff == 0) {
+        return;
+    }
+
+    normScale = scale / diff;
+
+    dest->x *= normScale;
+    dest->y *= normScale;
+    dest->z *= normScale;
+}
+
 f32 Math_Vec3f_DiffY(Vec3f* a, Vec3f* b) {
     return b->y - a->y;
 }

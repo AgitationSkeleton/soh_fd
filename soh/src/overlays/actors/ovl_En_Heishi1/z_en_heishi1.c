@@ -9,7 +9,6 @@
 #include "vt.h"
 #include "soh/ResourceManagerHelpers.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
-#include "soh/Enhancements/savestate_serialize.h"
 
 #define FLAGS ACTOR_FLAG_UPDATE_CULLING_DISABLED
 
@@ -33,11 +32,7 @@ void EnHeishi1_TurnTowardLink(EnHeishi1* this, PlayState* play);
 void EnHeishi1_Kick(EnHeishi1* this, PlayState* play);
 void EnHeishi1_WaitNight(EnHeishi1* this, PlayState* play);
 
-static s32 sPlayerIsCaught = false;
-
-#define EN_HEISHI1_SHIP_SAVESTATE_FIELDS(F) F(sPlayerIsCaught)
-
-SHIP_SAVESTATE_DEFINE(EnHeishi1, EN_HEISHI1_SHIP_SAVESTATE_FIELDS)
+s32 sHeishi1PlayerIsCaught = false;
 
 const ActorInit En_Heishi1_InitVars = {
     ACTOR_EN_HEISHI1,
@@ -73,7 +68,7 @@ static s32 sCamDataIdxs[] = {
 static s16 sWaypoints[] = { 0, 4, 1, 5, 2, 6, 3, 7 };
 
 void EnHeishi1_Reset(void) {
-    sPlayerIsCaught = false;
+    sHeishi1PlayerIsCaught = false;
 }
 
 void EnHeishi1_Init(Actor* thisx, PlayState* play) {
@@ -182,7 +177,7 @@ void EnHeishi1_Walk(EnHeishi1* this, PlayState* play) {
         Audio_PlayActorSound2(&this->actor, NA_SE_EV_KNIGHT_WALK);
     }
 
-    if (!sPlayerIsCaught) {
+    if (!sHeishi1PlayerIsCaught) {
         path = &play->setupPathList[this->path];
         pointPos = SEGMENTED_TO_VIRTUAL(path->points);
         pointPos += this->waypoint;
@@ -287,7 +282,7 @@ void EnHeishi1_Wait(EnHeishi1* this, PlayState* play) {
     s32 i;
 
     SkelAnime_Update(&this->skelAnime);
-    if (!sPlayerIsCaught) {
+    if (!sHeishi1PlayerIsCaught) {
         switch (this->headBehaviorDecided) {
             case false:
                 this->headDirection++;
@@ -380,7 +375,7 @@ void EnHeishi1_Kick(EnHeishi1* this, PlayState* play) {
                 play->nextEntranceIndex = ENTR_HYRULE_CASTLE_3;
                 play->transitionTrigger = TRANS_TRIGGER_START;
                 this->loadStarted = true;
-                sPlayerIsCaught = false;
+                sHeishi1PlayerIsCaught = false;
                 play->transitionType = TRANS_TYPE_CIRCLE(TCA_STARBURST, TCC_WHITE, TCS_FAST);
                 gSaveContext.nextTransitionType = TRANS_TYPE_CIRCLE(TCA_STARBURST, TCC_WHITE, TCS_FAST);
             }
@@ -441,7 +436,7 @@ void EnHeishi1_Update(Actor* thisx, PlayState* play) {
         if (this->type != 5) {
             path = this->path * 2;
             if ((sCamDataIdxs[path] == activeCam->camDataIdx) || (sCamDataIdxs[path + 1] == activeCam->camDataIdx)) {
-                if (!sPlayerIsCaught) {
+                if (!sHeishi1PlayerIsCaught) {
                     if ((this->actionFunc == EnHeishi1_Walk) || (this->actionFunc == EnHeishi1_Wait)) {
                         Vec3f searchBallVel;
                         Vec3f searchBallAccel = { 0.0f, 0.0f, 0.0f };
@@ -487,7 +482,7 @@ void EnHeishi1_Update(Actor* thisx, PlayState* play) {
                                     // "Discovered!"
                                     osSyncPrintf(VT_FGCOL(GREEN) "☆☆☆☆☆ 発見！ ☆☆☆☆☆ \n" VT_RST);
                                     Player_SetCsActionWithHaltedActors(play, &this->actor, 1);
-                                    sPlayerIsCaught = true;
+                                    sHeishi1PlayerIsCaught = true;
                                     this->actionFunc = EnHeishi1_SetupMoveToLink;
                                 }
                             }

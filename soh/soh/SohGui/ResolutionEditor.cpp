@@ -1,5 +1,6 @@
 #include "ResolutionEditor.h"
 #include <imgui.h>
+#include <libultraship/libultraship.h>
 
 #include "soh/SohGui/UIWidgets.hpp"
 #include <fast/Fast3dWindow.h>

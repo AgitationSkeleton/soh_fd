@@ -1,0 +1,11 @@
+<Sequence Version="0" Medium="Ram" CachePolicy="Persistent" Size="0" Index="65535" Streamed="true" Length="4" Looped="false" Stereo="false">
+    <Fonts>
+        <Font FontIdx="145"/>
+        <Font FontIdx="159"/>
+        <Font FontIdx="205"/>
+        <Font FontIdx="96"/>
+        <Font FontIdx="147"/>
+        <Font FontIdx="102"/>
+        <Font FontIdx="78"/>
+        <Font FontIdx="0"/>    </Fonts>
+</Sequence>

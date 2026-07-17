@@ -14,6 +14,8 @@
 #include "soh/SaveManager.h"
 #include "soh/framebuffer_effects.h"
 
+#include <libultraship/libultraship.h>
+
 #include <time.h>
 #include <assert.h>
 
@@ -33,6 +35,7 @@ Input* D_8012D1F8 = NULL;
 
 PlayState* gPlayState;
 s16 firstInit = 0;
+s16 gEnPartnerId;
 
 void Play_SpawnScene(PlayState* play, s32 sceneId, s32 spawn);
 
@@ -327,10 +330,6 @@ u8 CheckDungeonCount() {
         dungeonCount++;
     }
 
-    if (Flags_GetRandomizerInf(RAND_INF_DUNGEONS_DONE_GANONS_TOWER)) {
-        dungeonCount++;
-    }
-
     return dungeonCount;
 }
 
@@ -350,6 +349,24 @@ u8 CheckBridgeRewardCount() {
             break;
     }
     return bridgeRewardCount;
+}
+
+u8 CheckLACSRewardCount() {
+    u8 lacsRewardCount = 0;
+
+    switch (Randomizer_GetSettingValue(RSK_LACS_OPTIONS)) {
+        case RO_LACS_WILDCARD_REWARD:
+            if (Flags_GetRandomizerInf(RAND_INF_GREG_FOUND)) {
+                lacsRewardCount += 1;
+            }
+            break;
+        case RO_LACS_GREG_REWARD:
+            if (Flags_GetRandomizerInf(RAND_INF_GREG_FOUND)) {
+                lacsRewardCount += 1;
+            }
+            break;
+    }
+    return lacsRewardCount;
 }
 
 void Play_Init(GameState* thisx) {
@@ -406,9 +423,9 @@ void Play_Init(GameState* thisx) {
         Camera_ChangeStatus(&play->subCameras[i], CAM_STAT_UNK100);
     }
 
-    play->cameraPtrs[CAM_ID_MAIN] = &play->mainCamera;
-    play->cameraPtrs[CAM_ID_MAIN]->uid = 0;
-    play->activeCamera = CAM_ID_MAIN;
+    play->cameraPtrs[MAIN_CAM] = &play->mainCamera;
+    play->cameraPtrs[MAIN_CAM]->uid = 0;
+    play->activeCamera = MAIN_CAM;
     func_8005AC48(&play->mainCamera, 0xFF);
     // Sram_Init(this, &this->sramCtx);
     Regs_InitData(play);
@@ -443,41 +460,82 @@ void Play_Init(GameState* thisx) {
 
     Cutscene_HandleConditionalTriggers(play);
 
+    // FD (2026-07-12) #D: silent auto-revert when a Fierce Deity leaves its usable zone via a scene load (the
+    // fishing-hole exit door, or a boss room by any non-blue-warp exit). If the DESTINATION scene is NOT a boss
+    // lair / fishing hole (cheat off), drop to the real age HERE -- before the age-based scene-layer choice and
+    // Play_SpawnScene below -- so Link's skeleton loads directly as adult/child (no arrival flash). Restores the
+    // B item (was the FD sword) exactly like the FD apex commit does.
+    if ((gSaveContext.linkAge == LINK_AGE_DEITY) &&
+        !CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdUsableAnywhere"), 0)) {
+        s32 destScene = gEntranceTable[((void)0, gSaveContext.entranceIndex)].scene;
+        s32 fdOk = (destScene == SCENE_DEKU_TREE_BOSS) || (destScene == SCENE_DODONGOS_CAVERN_BOSS) ||
+                   (destScene == SCENE_JABU_JABU_BOSS) || (destScene == SCENE_FOREST_TEMPLE_BOSS) ||
+                   (destScene == SCENE_FIRE_TEMPLE_BOSS) || (destScene == SCENE_WATER_TEMPLE_BOSS) ||
+                   (destScene == SCENE_SPIRIT_TEMPLE_BOSS) || (destScene == SCENE_SHADOW_TEMPLE_BOSS) ||
+                   (destScene == SCENE_GANONDORF_BOSS) || (destScene == SCENE_GANON_BOSS) ||
+                   (destScene == SCENE_FISHING_POND);
+        if (!fdOk) {
+            u8 realAge = gSaveContext.ship.fierceDeityPreviousForm;
+            if (realAge > LINK_AGE_CHILD) {
+                realAge = LINK_AGE_ADULT; // 0xFF safety clamp
+            }
+            gSaveContext.linkAge = realAge;
+            gSaveContext.equips.buttonItems[0] = gSaveContext.ship.fierceDeityBButtonMemory; // restore B (was FD sword)
+            gSaveContext.ship.fierceDeityPreviousForm = 0xFF;
+        }
+    }
+
+    // FD (2026-07-12) #8: debug-warp (map/scene select) sets linkAge DIRECTLY to a normal age and does NOT run the
+    // FD revert, so the linkAge==DEITY branch above is skipped and B is left holding ITEM_SWORD_DEITY forever
+    // (anywhere, not just non-boss rooms). Landing any non-deity age with the FD blade still on B is always wrong,
+    // regardless of how we got here -- restore it. Prefer the stashed pre-transform B item; if that's missing or is
+    // itself the FD sword, fall back to the age's own sword (Kokiri for child, Master for adult) so B can never be
+    // stuck on the deity blade out of deity form. (The per-frame FD-sword-on-B force in Player_UpdateCommon is
+    // LINK_IS_DEITY-gated, so it won't re-apply here once the age is normal.)
+    if ((gSaveContext.linkAge != LINK_AGE_DEITY) && (gSaveContext.equips.buttonItems[0] == ITEM_SWORD_DEITY)) {
+        u8 restore = gSaveContext.ship.fierceDeityBButtonMemory;
+        if ((restore == ITEM_SWORD_DEITY) || (restore == ITEM_NONE) || (restore == ITEM_NONE_FE)) {
+            restore = (gSaveContext.linkAge == LINK_AGE_CHILD) ? ITEM_SWORD_KOKIRI : ITEM_SWORD_MASTER;
+        }
+        gSaveContext.equips.buttonItems[0] = restore;
+        gSaveContext.ship.fierceDeityPreviousForm = 0xFF;
+    }
+
     if (gSaveContext.gameMode != GAMEMODE_NORMAL || gSaveContext.cutsceneIndex >= 0xFFF0) {
         gSaveContext.nayrusLoveTimer = 0;
         Magic_Reset(play);
-        gSaveContext.sceneLayer = SCENE_LAYER_CUTSCENE_FIRST + (gSaveContext.cutsceneIndex & 0xF);
+        gSaveContext.sceneSetupIndex = SCENE_LAYER_CUTSCENE_FIRST + (gSaveContext.cutsceneIndex & 0xF);
     } else if (!LINK_IS_ADULT && IS_DAY) {
-        gSaveContext.sceneLayer = SCENE_LAYER_CHILD_DAY;
+        gSaveContext.sceneSetupIndex = SCENE_LAYER_CHILD_DAY;
     } else if (!LINK_IS_ADULT && !IS_DAY) {
-        gSaveContext.sceneLayer = SCENE_LAYER_CHILD_NIGHT;
+        gSaveContext.sceneSetupIndex = SCENE_LAYER_CHILD_NIGHT;
     } else if (LINK_IS_ADULT && IS_DAY) {
-        gSaveContext.sceneLayer = SCENE_LAYER_ADULT_DAY;
+        gSaveContext.sceneSetupIndex = SCENE_LAYER_ADULT_DAY;
     } else {
-        gSaveContext.sceneLayer = SCENE_LAYER_ADULT_NIGHT;
+        gSaveContext.sceneSetupIndex = SCENE_LAYER_ADULT_NIGHT;
     }
 
     // save the base scene layer (before accounting for the special cases below) to use later for the transition type
-    baseSceneLayer = gSaveContext.sceneLayer;
+    baseSceneLayer = gSaveContext.sceneSetupIndex;
 
     if ((gEntranceTable[((void)0, gSaveContext.entranceIndex)].scene == SCENE_HYRULE_FIELD) && !LINK_IS_ADULT &&
         !IS_CUTSCENE_LAYER) {
         if (CHECK_QUEST_ITEM(QUEST_KOKIRI_EMERALD) && CHECK_QUEST_ITEM(QUEST_GORON_RUBY) &&
             CHECK_QUEST_ITEM(QUEST_ZORA_SAPPHIRE)) {
-            gSaveContext.sceneLayer = 1;
+            gSaveContext.sceneSetupIndex = 1;
         } else {
-            gSaveContext.sceneLayer = 0;
+            gSaveContext.sceneSetupIndex = 0;
         }
     } else if ((gEntranceTable[((void)0, gSaveContext.entranceIndex)].scene == SCENE_KOKIRI_FOREST) && LINK_IS_ADULT &&
                !IS_CUTSCENE_LAYER) {
-        gSaveContext.sceneLayer = (Flags_GetEventChkInf(EVENTCHKINF_USED_FOREST_TEMPLE_BLUE_WARP)) ? 3 : 2;
+        gSaveContext.sceneSetupIndex = (Flags_GetEventChkInf(EVENTCHKINF_USED_FOREST_TEMPLE_BLUE_WARP)) ? 3 : 2;
     }
 
-    Play_SpawnScene(play,
-                    gEntranceTable[((void)0, gSaveContext.entranceIndex) + ((void)0, gSaveContext.sceneLayer)].scene,
-                    gEntranceTable[((void)0, gSaveContext.sceneLayer) + ((void)0, gSaveContext.entranceIndex)].spawn);
+    Play_SpawnScene(
+        play, gEntranceTable[((void)0, gSaveContext.entranceIndex) + ((void)0, gSaveContext.sceneSetupIndex)].scene,
+        gEntranceTable[((void)0, gSaveContext.sceneSetupIndex) + ((void)0, gSaveContext.entranceIndex)].spawn);
 
-    osSyncPrintf("\nSCENE_NO=%d COUNTER=%d\n", ((void)0, gSaveContext.entranceIndex), gSaveContext.sceneLayer);
+    osSyncPrintf("\nSCENE_NO=%d COUNTER=%d\n", ((void)0, gSaveContext.entranceIndex), gSaveContext.sceneSetupIndex);
 
 #if 0
     // When entering Gerudo Valley in the credits, trigger the GC emulator to play the ending movie.
@@ -524,9 +582,12 @@ void Play_Init(GameState* thisx) {
     play->state.main = Play_Main;
     play->state.destroy = Play_Destroy;
     play->transitionTrigger = TRANS_TRIGGER_END;
+    play->ageChangeFlag = -1; // FD (2026-07-11): idle (no transform fade); RE z_scene.c:298
+    play->ageChangeTimer = 0;
+    play->ageChangeFadeAlpha = 0;
     play->unk_11E16 = 0xFF;
-    play->bgCoverAlpha = 0;
-    play->haltAllActors = false;
+    play->unk_11E18 = 0;
+    play->unk_11DE9 = false;
 
     if (gSaveContext.gameMode != GAMEMODE_TITLE_SCREEN) {
         if (gSaveContext.nextTransitionType == TRANS_NEXT_TYPE_DEFAULT) {
@@ -579,7 +640,11 @@ void Play_Init(GameState* thisx) {
     gItemAgeReqs[ITEM_ROCS_FEATHER] = AGE_REQ_NONE;
     gSlotAgeReqs[SLOT_NAYRUS_LOVE] = AGE_REQ_NONE;
 
-    Actor_InitContext(play, &play->actorCtx, play->linkActorEntry);
+    // FD (2026-07-11): the Fierce Deity's Mask is usable by both ages, so keep its kaleido icon from being
+    // age-greyed when it is cycled onto the first bottle slot.
+    gItemAgeReqs[ITEM_MASK_DEITY] = AGE_REQ_NONE;
+
+    func_800304DC(play, &play->actorCtx, play->linkActorEntry);
 
     while (!func_800973FC(play, &play->roomCtx)) {
         ; // Empty Loop
@@ -620,7 +685,7 @@ void Play_Init(GameState* thisx) {
     Environment_PlaySceneSequence(play);
     gSaveContext.seqId = play->sequenceCtx.seqId;
     gSaveContext.natureAmbienceId = play->sequenceCtx.natureAmbienceId;
-    Actor_InitPlayerHorse(play, GET_PLAYER(play));
+    func_8002DF18(play, GET_PLAYER(play));
     AnimationContext_Update(play, &play->animationCtx);
     gSaveContext.respawnFlag = 0;
 
@@ -793,7 +858,7 @@ void Play_Update(PlayState* play) {
                 case TRANS_MODE_SETUP:
                     if (play->transitionTrigger != TRANS_TRIGGER_END) {
                         s16 sceneLayer = 0;
-                        Interface_ChangeHudVisibilityMode(1);
+                        Interface_ChangeAlpha(1);
 
                         if (gSaveContext.cutsceneIndex >= 0xFFF0) {
                             sceneLayer = SCENE_LAYER_CUTSCENE_FIRST + (gSaveContext.cutsceneIndex & 0xF);
@@ -1191,7 +1256,7 @@ void Play_Update(PlayState* play) {
 
                     PLAY_LOG(3637);
 
-                    if (!play->haltAllActors) {
+                    if (!play->unk_11DE9) {
                         Actor_UpdateAll(play, &play->actorCtx);
                     }
 
@@ -1418,6 +1483,32 @@ void Play_Draw(PlayState* play) {
             gSPDisplayList(OVERLAY_DISP++, gfxP);
             gSPGrayscale(gfxP++, false);
 
+            // FD (2026-07-11): Fierce Deity transform white-fade driver (RE z_play.c:1196-1225). Self-contained:
+            // ramps ageChangeFadeAlpha up while a transform is pending (ageChangeFlag >= 0) and back down while
+            // idle (< 0), then fills the screen white at the current alpha. Player_Draw commits the age swap at
+            // the fully-white apex. (RE plays NA_SE_EV_FORM_CHANGE on fade start; that sfx is absent in SoH --
+            // the transform trigger already plays NA_SE_PL_CHANGE_ARMS, so it is omitted here. TODO FD sfx.)
+            if (play->ageChangeFlag >= 0) {
+                play->ageChangeFadeAlpha += TRANSFORM_FADE_SPEED;
+            } else if (play->ageChangeFadeAlpha != 0) {
+                play->ageChangeFadeAlpha -= TRANSFORM_FADE_SPEED;
+            }
+            play->ageChangeFadeAlpha = CLAMP(play->ageChangeFadeAlpha, 0, 255 + TRANSFORM_EXTRA_FADE_FRAMES);
+            if (play->ageChangeFadeAlpha != 0) {
+                gDPPipeSync(gfxP++);
+                gSPClearGeometryMode(gfxP++, G_ZBUFFER | G_SHADE | G_CULL_BOTH | G_FOG | G_LIGHTING |
+                                                 G_TEXTURE_GEN | G_TEXTURE_GEN_LINEAR | G_LOD | G_SHADING_SMOOTH);
+                gDPSetOtherMode(gfxP++,
+                                G_AD_DISABLE | G_CD_MAGICSQ | G_CK_NONE | G_TC_FILT | G_TF_BILERP | G_TT_NONE |
+                                    G_TL_TILE | G_TD_CLAMP | G_TP_NONE | G_CYC_1CYCLE | G_PM_1PRIMITIVE,
+                                G_AC_NONE | G_ZS_PIXEL | G_RM_CLD_SURF | G_RM_CLD_SURF2);
+                gDPSetCombineLERP(gfxP++, 0, 0, 0, PRIMITIVE, 0, 0, 0, PRIMITIVE, 0, 0, 0, PRIMITIVE, 0, 0, 0,
+                                  PRIMITIVE);
+                gDPSetPrimColor(gfxP++, 0, 0, 255, 255, 255, CLAMP(play->ageChangeFadeAlpha, 0, 255));
+                gDPFillRectangle(gfxP++, 0, 0, gScreenWidth - 1, gScreenHeight - 1);
+                gDPPipeSync(gfxP++);
+            }
+
             if ((play->transitionMode == TRANS_MODE_INSTANCE_RUNNING) ||
                 (play->transitionMode == TRANS_MODE_INSTANCE_WAIT) ||
                 (play->transitionCtx.transitionType >= TRANS_TYPE_MAX)) {
@@ -1542,11 +1633,11 @@ void Play_Draw(PlayState* play) {
         }
 
         if ((HREG(80) != 10) || (HREG(84) != 0)) {
-            Environment_FillScreen(gfxCtx, 0, 0, 0, play->bgCoverAlpha, FILL_SCREEN_OPA);
+            Environment_FillScreen(gfxCtx, 0, 0, 0, play->unk_11E18, FILL_SCREEN_OPA);
         }
 
         if ((HREG(80) != 10) || (HREG(85) != 0)) {
-            Actor_DrawAll(play, &play->actorCtx);
+            func_800315AC(play, &play->actorCtx);
         }
 
         if ((HREG(80) != 10) || (HREG(86) != 0)) {
@@ -1863,7 +1954,7 @@ void func_800C016C(PlayState* play, Vec3f* src, Vec3f* dest) {
 s16 Play_CreateSubCamera(PlayState* play) {
     s16 i;
 
-    for (i = CAM_ID_SUB_FIRST; i < NUM_CAMS; i++) {
+    for (i = SUBCAM_FIRST; i < NUM_CAMS; i++) {
         if (play->cameraPtrs[i] == NULL) {
             break;
         }
@@ -1878,7 +1969,7 @@ s16 Play_CreateSubCamera(PlayState* play) {
                      CYAN) " " VT_RST "\n",
                  i);
 
-    play->cameraPtrs[i] = &play->subCameras[i - CAM_ID_SUB_FIRST];
+    play->cameraPtrs[i] = &play->subCameras[i - SUBCAM_FIRST];
     Camera_Init(play->cameraPtrs[i], &play->view, &play->colCtx, play);
     play->cameraPtrs[i]->thisIdx = i;
 
@@ -1902,7 +1993,7 @@ s16 Play_ChangeCameraStatus(PlayState* play, s16 camId, s16 status) {
 void Play_ClearCamera(PlayState* play, s16 camId) {
     s16 camIdx = (camId == SUBCAM_ACTIVE) ? play->activeCamera : camId;
 
-    if (camIdx == CAM_ID_MAIN) {
+    if (camIdx == MAIN_CAM) {
         osSyncPrintf(VT_COL(RED, WHITE) "camera control: error: never clear camera !!\n" VT_RST);
     }
 
@@ -1920,13 +2011,13 @@ void Play_ClearCamera(PlayState* play, s16 camId) {
 void Play_ClearAllSubCameras(PlayState* play) {
     s16 i;
 
-    for (i = CAM_ID_SUB_FIRST; i < NUM_CAMS; i++) {
+    for (i = SUBCAM_FIRST; i < NUM_CAMS; i++) {
         if (play->cameraPtrs[i] != NULL) {
             Play_ClearCamera(play, i);
         }
     }
 
-    play->activeCamera = CAM_ID_MAIN;
+    play->activeCamera = MAIN_CAM;
 }
 
 Camera* Play_GetCamera(PlayState* play, s16 camId) {
@@ -2017,11 +2108,11 @@ s32 func_800C0808(PlayState* play, s16 camId, Player* player, s16 setting) {
 
     camera = play->cameraPtrs[camIdx];
     Camera_InitPlayerSettings(camera, player);
-    return Camera_RequestSetting(camera, setting);
+    return Camera_ChangeSetting(camera, setting);
 }
 
 s32 Play_CameraChangeSetting(PlayState* play, s16 camId, s16 setting) {
-    return Camera_RequestSetting(Play_GetCamera(play, camId), setting);
+    return Camera_ChangeSetting(Play_GetCamera(play, camId), setting);
 }
 
 void func_800C08AC(PlayState* play, s16 camId, s16 arg2) {
@@ -2030,7 +2121,7 @@ void func_800C08AC(PlayState* play, s16 camId, s16 arg2) {
 
     Play_ClearCamera(play, camIdx);
 
-    for (i = CAM_ID_SUB_FIRST; i < NUM_CAMS; i++) {
+    for (i = SUBCAM_FIRST; i < NUM_CAMS; i++) {
         if (play->cameraPtrs[i] != NULL) {
             osSyncPrintf(
                 VT_COL(RED, WHITE) "camera control: error: return to main, other camera left. %d cleared!!\n" VT_RST,
@@ -2040,10 +2131,10 @@ void func_800C08AC(PlayState* play, s16 camId, s16 arg2) {
     }
 
     if (arg2 <= 0) {
-        Play_ChangeCameraStatus(play, CAM_ID_MAIN, CAM_STAT_ACTIVE);
-        play->cameraPtrs[CAM_ID_MAIN]->childCamIdx = play->cameraPtrs[CAM_ID_MAIN]->parentCamIdx = SUBCAM_FREE;
+        Play_ChangeCameraStatus(play, MAIN_CAM, CAM_STAT_ACTIVE);
+        play->cameraPtrs[MAIN_CAM]->childCamIdx = play->cameraPtrs[MAIN_CAM]->parentCamIdx = SUBCAM_FREE;
     } else {
-        OnePointCutscene_Init(play, 1020, arg2, NULL, CAM_ID_MAIN);
+        OnePointCutscene_Init(play, 1020, arg2, NULL, MAIN_CAM);
     }
 }
 
@@ -2141,7 +2232,7 @@ void Play_TriggerRespawn(PlayState* play) {
     Play_LoadToLastEntrance(play);
 }
 
-s32 Play_CamIsNotFixed(PlayState* play) {
+s32 func_800C0CB8(PlayState* play) {
     return (play->roomCtx.curRoom.meshHeader->base.type != 1) && (YREG(15) != 0x20) && (YREG(15) != 0x30) &&
            (YREG(15) != 0x40) && (play->sceneNum != SCENE_CASTLE_COURTYARD_GUARDS_DAY);
 }
@@ -2208,7 +2299,7 @@ void Play_PerformSave(PlayState* play) {
             (gSaveContext.equips.buttonItems[0] == ITEM_NONE && !Flags_GetInfTable(INFTABLE_SWORDLESS))) {
 
             gSaveContext.equips.buttonItems[0] = gSaveContext.buttonStatus[0];
-            GameInteractor_Should(VB_TEMP_B_RESTORE_SWORDLESS, true);
+            Interface_RandoRestoreSwordless();
         }
 
         Save_SaveFile();

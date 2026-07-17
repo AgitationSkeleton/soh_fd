@@ -1,14 +1,10 @@
 #pragma once
 
 #include <string>
-#include <map>
 #include <vector>
 #include <stdint.h>
 
-#include <nlohmann/json_fwd.hpp>
-#include <libultraship/color.h>
-#include <libultraship/libultra.h>
-#include <ship/window/gui/GuiWindow.h>
+#include <libultraship/libultraship.h>
 #include "randomizerTypes.h"
 
 typedef enum {
@@ -114,7 +110,7 @@ void InitEntranceTrackingData();
 s16 GetLastEntranceOverride();
 s16 GetCurrentGrottoId();
 const EntranceData* GetEntranceData(s16);
-void LoadFromPreset(const nlohmann::json& info);
+void LoadFromPreset(nlohmann::json info);
 
 class EntranceTrackerSettingsWindow final : public Ship::GuiWindow {
   public:

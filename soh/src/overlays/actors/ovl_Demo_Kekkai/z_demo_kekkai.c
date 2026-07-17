@@ -9,7 +9,6 @@
 #include "scenes/dungeons/ganontika/ganontika_scene.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/ResourceManagerHelpers.h"
-#include "soh/Enhancements/savestate_serialize.h"
 
 #define FLAGS (ACTOR_FLAG_UPDATE_CULLING_DISABLED | ACTOR_FLAG_DRAW_CULLING_DISABLED)
 
@@ -140,12 +139,7 @@ void DemoKekkai_Destroy(Actor* thisx, PlayState* play) {
     Collider_DestroyCylinder(play, &this->collider2);
 }
 
-static Vec3f demoKekkaiVel = { 0.0f, 0.0f, 0.0f };
-
-#define DEMO_KEKKAI_SHIP_SAVESTATE_FIELDS(F) F(demoKekkaiVel)
-
-SHIP_SAVESTATE_DEFINE(DemoKekkai, DEMO_KEKKAI_SHIP_SAVESTATE_FIELDS)
-
+Vec3f demoKekkaiVel = { 0.0f, 0.0f, 0.0f };
 void DemoKekkai_SpawnParticles(DemoKekkai* this, PlayState* play) {
     static Vec3f accel = { 0.0f, 0.0f, 0.0f };
     static Color_RGBA8 lightYellow = { 255, 255, 170, 0 };
@@ -191,7 +185,7 @@ void DemoKekkai_TowerBarrier(DemoKekkai* this, PlayState* play) {
         }
     }
     if (!(this->sfxFlag & 1)) {
-        Actor_PlaySfx_Flagged(&this->actor, NA_SE_EV_TOWER_BARRIER - SFX_FLAG);
+        func_8002F974(&this->actor, NA_SE_EV_TOWER_BARRIER - SFX_FLAG);
     }
 }
 
@@ -201,7 +195,7 @@ void DemoKekkai_Update(Actor* thisx, PlayState* play2) {
 
     if (this->energyAlpha > 0.99f) {
         if ((this->collider1.base.atFlags & AT_HIT) || (this->collider2.base.atFlags & AT_HIT)) {
-            Actor_SetPlayerKnockbackLargeNoDamage(play, &this->actor, 6.0f, this->actor.yawTowardsPlayer, 6.0f);
+            func_8002F71C(play, &this->actor, 6.0f, this->actor.yawTowardsPlayer, 6.0f);
         }
         CollisionCheck_SetAT(play, &play->colChkCtx, &this->collider1.base);
         CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider1.base);
@@ -239,7 +233,7 @@ void DemoKekkai_TrialBarrierDispel(Actor* thisx, PlayState* play) {
         this->orbScale = 0.0f;
     }
     if (this->orbScale != 0.0f) {
-        Actor_PlaySfx_Flagged(&this->actor, NA_SE_EV_TOWER_ENERGY - SFX_FLAG);
+        func_8002F974(&this->actor, NA_SE_EV_TOWER_ENERGY - SFX_FLAG);
     }
     this->timer++;
 }
@@ -259,7 +253,7 @@ void DemoKekkai_TrialBarrierIdle(Actor* thisx, PlayState* play) {
     DemoKekkai* this = (DemoKekkai*)thisx;
 
     if (this->collider1.base.atFlags & AT_HIT) {
-        Actor_SetPlayerKnockbackLargeNoDamage(play, &this->actor, 5.0f, this->actor.yawTowardsPlayer, 5.0f);
+        func_8002F71C(play, &this->actor, 5.0f, this->actor.yawTowardsPlayer, 5.0f);
     }
     CollisionCheck_SetAT(play, &play->colChkCtx, &this->collider1.base);
     CollisionCheck_SetOC(play, &play->colChkCtx, &this->collider1.base);
@@ -275,7 +269,7 @@ void DemoKekkai_TrialBarrierIdle(Actor* thisx, PlayState* play) {
         }
     }
     CollisionCheck_SetAC(play, &play->colChkCtx, &this->collider2.base);
-    Actor_PlaySfx_Flagged(&this->actor, NA_SE_EV_TOWER_ENERGY - SFX_FLAG);
+    func_8002F974(&this->actor, NA_SE_EV_TOWER_ENERGY - SFX_FLAG);
 }
 
 void DemoKekkai_DrawTrialBarrier(Actor* thisx, PlayState* play2) {

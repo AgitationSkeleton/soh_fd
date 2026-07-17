@@ -1,10 +1,11 @@
 #include "playthrough.hpp"
 
-#include <spdlog/spdlog.h>
+#include <libultraship/libultraship.h>
 #include "fill.hpp"
 #include "../location_access.h"
 #include "random.hpp"
 #include "spoiler_log.hpp"
+#include "soh/Enhancements/randomizer/randomizerTypes.h"
 #include "soh/Enhancements/randomizer/settings.h"
 #include "variables.h"
 #include "soh/cvar_prefixes.h"

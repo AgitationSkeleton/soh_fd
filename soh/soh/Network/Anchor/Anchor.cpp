@@ -1,5 +1,6 @@
 #include "Anchor.h"
 #include <nlohmann/json.hpp>
+#include <libultraship/libultraship.h>
 #include "soh/OTRGlobals.h"
 #include "soh/Enhancements/nametag.h"
 #include "soh/ObjectExtension/ObjectExtension.h"
@@ -93,7 +94,10 @@ void Anchor::OnIncomingJson(nlohmann::json payload) {
 
     std::string packetType = payload["type"].get<std::string>();
 
-    // Ignore packets from mismatched clients, except for ALL_CLIENT_STATE, UPDATE_CLIENT_STATE, and PLAYER_UPDATE
+    // Ignore packets from mismatched clients, except for ALL_CLIENT_STATE, UPDATE_CLIENT_STATE, and PLAYER_UPDATE.
+    // (FD 2026-07-15: the earlier "Require Matching Game Build" toggle that also dropped PLAYER_UPDATE was removed --
+    // Anchor already version-gates every state-changing packet here, and the cosmetic PLAYER_UPDATE sync across builds
+    // is harmless, so the extra gate was redundant.)
     if (packetType != ALL_CLIENT_STATE && packetType != UPDATE_CLIENT_STATE && packetType != PLAYER_UPDATE) {
         if (payload.contains("clientId")) {
             uint32_t clientId = payload["clientId"].get<uint32_t>();

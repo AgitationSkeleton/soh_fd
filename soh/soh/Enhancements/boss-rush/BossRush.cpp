@@ -8,7 +8,6 @@
 #include <array>
 #include <string>
 #include <vector>
-#include <spdlog/spdlog.h>
 
 extern "C" {
 #include "functions.h"
@@ -94,6 +93,11 @@ typedef enum {
 } BossRushBunnyHoodChoices;
 
 typedef enum {
+    BR_CHOICE_FIERCEDEITYMASK_NO,
+    BR_CHOICE_FIERCEDEITYMASK_YES,
+} BossRushFierceDeityMaskChoices;
+
+typedef enum {
     BR_CHOICE_TIMER_YES,
     BR_CHOICE_TIMER_NO,
 } BossRushTimerChoices;
@@ -167,6 +171,11 @@ BossRushSetting BossRushOptions[BR_OPTIONS_MAX] = {
           { "Yes", "Ja", "Oui" },
       } },
     { { "BUNNY HOOD:", "HASENOHREN:", "MASQUE DU LAPIN:" },
+      {
+          { "No", "Nein", "Non" },
+          { "Yes", "Ja", "Oui" },
+      } },
+    { { "FD MASK:", "FD-MASKE:", "MASQUE DÉITÉ:" }, // FD (2026-07-12): Fierce Deity's Mask
       {
           { "No", "Nein", "Non" },
           { "Yes", "Ja", "Oui" },
@@ -673,6 +682,14 @@ extern "C" void BossRush_InitSave() {
 
     for (int item = 0; item < ARRAY_COUNT(gSaveContext.inventory.items); item++) {
         gSaveContext.inventory.items[item] = brItems[item];
+    }
+
+    // FD (2026-07-12): "start with Fierce Deity's Mask" boss-rush option. The FD mask is NOT a normal inventory item
+    // (it lives on gSaveContext.ship.hasFierceDeityMask and is cycled onto a C-button from the shared bottle slot),
+    // so set the ownership flag directly -- same effect as the rando "Start with Fierce Deity's Mask" grant. The
+    // player cycles to it in the pause menu; the transformation-masks feature must be enabled for it to appear.
+    if (gSaveContext.ship.quest.data.bossRush.options[BR_OPTIONS_FIERCE_DEITY_MASK] == BR_CHOICE_FIERCEDEITYMASK_YES) {
+        gSaveContext.ship.hasFierceDeityMask = 1;
     }
 
     // Set consumable counts

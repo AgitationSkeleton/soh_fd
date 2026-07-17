@@ -1,6 +1,7 @@
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Network/Anchor/JsonConversions.hpp"
 #include <nlohmann/json.hpp>
+#include <libultraship/libultraship.h>
 #include "soh/OTRGlobals.h"
 #include "soh/Notification/Notification.h"
 #include "soh/Enhancements/randomizer/randomizer.h"
@@ -143,6 +144,9 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
         gSaveContext.bgsFlag = loadedData.bgsFlag;
         gSaveContext.swordHealth = loadedData.swordHealth;
         gSaveContext.ship.quest = loadedData.ship.quest;
+        // FD (2026-07-14): reconcile FD-mask ownership monotonically (once obtained by anyone in a shared room,
+        // it stays obtained). Covers late joiners / reconnects; live obtains use the GiveItem edge in HookHandlers.
+        gSaveContext.ship.hasFierceDeityMask |= loadedData.ship.hasFierceDeityMask;
 
         for (int i = 0; i < 124; i++) {
             if (i == SCENE_WATER_TEMPLE) {
@@ -161,7 +165,7 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
 
             if (i == SCENE_GANONS_TOWER_COLLAPSE_EXTERIOR) {
                 // Keep collapse timer flag
-                u32 mask = (1 << 0x17);
+                u32 mask = (1 << 0x36);
                 loadedData.sceneFlags[i].swch =
                     (loadedData.sceneFlags[i].swch & ~mask) | (gSaveContext.sceneFlags[i].swch & mask);
             }
@@ -198,11 +202,6 @@ void Anchor::HandlePacket_UpdateTeamState(nlohmann::json payload) {
 
         gSaveContext.ship.stats.firstInput = loadedData.ship.stats.firstInput;
         gSaveContext.ship.stats.fileCreatedAt = loadedData.ship.stats.fileCreatedAt;
-
-        // Ensure ganon barrier state matches trials
-        if (gSaveContext.eventChkInf[10] & 0x2000 && gSaveContext.eventChkInf[11] & 0xFC00) {
-            gSaveContext.eventChkInf[12] |= 0x8;
-        }
 
         // Restore master sword state
         // Disabling this for now, not really sure I understand why I did this in the past

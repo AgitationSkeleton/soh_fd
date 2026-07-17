@@ -3,6 +3,7 @@
 #ifdef __cplusplus
 
 #include <nlohmann/json.hpp>
+#include <libultraship/libultraship.h>
 #include "Anchor.h"
 
 extern "C" {
@@ -143,6 +144,10 @@ inline void to_json(json& j, const ShipSaveContextData& shipSaveContextData) {
         { "stats", shipSaveContextData.stats },
         { "quest", shipSaveContextData.quest },
         { "randomizerInf", shipSaveContextData.randomizerInf },
+        // FD (2026-07-14): the Fierce Deity mask is a custom ownership bool (no inventory slot / item-table
+        // entry), so it was previously carried by nothing. Ride it along here so a late-joining / reconnecting
+        // client reconciles it via UPDATE_TEAM_STATE (applied OR-merged in HandlePacket_UpdateTeamState).
+        { "hasFierceDeityMask", shipSaveContextData.hasFierceDeityMask },
     };
 }
 
@@ -150,6 +155,9 @@ inline void from_json(const json& j, ShipSaveContextData& shipSaveContextData) {
     j.at("stats").get_to(shipSaveContextData.stats);
     j.at("quest").get_to(shipSaveContextData.quest);
     j.at("randomizerInf").get_to(shipSaveContextData.randomizerInf);
+    // FD (2026-07-14): default-tolerant (.value) so a client on an older build that omits the key doesn't
+    // throw and abort the whole team-state parse.
+    shipSaveContextData.hasFierceDeityMask = j.value("hasFierceDeityMask", (u8)0);
 }
 
 inline void to_json(json& j, const SaveContext& saveContext) {

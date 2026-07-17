@@ -10,6 +10,7 @@ have functions to both enable and disable said effect.
 
 #include "GameInteractionEffect.h"
 #include "GameInteractor.h"
+#include <libultraship/bridge.h>
 #include "soh/Enhancements/cosmetics/CosmeticsEditor.h"
 
 extern "C" {

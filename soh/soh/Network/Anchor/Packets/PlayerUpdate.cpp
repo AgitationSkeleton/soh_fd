@@ -1,11 +1,16 @@
 #include "soh/Network/Anchor/Anchor.h"
 #include "soh/Network/Anchor/JsonConversions.hpp"
 #include <nlohmann/json.hpp>
+#include <libultraship/libultraship.h>
 
 extern "C" {
 #include "macros.h"
 #include "variables.h"
+#include "functions.h" // FD (2026-07-12): Player_GetFdTransformAnimId (Anchor transform-mask networking)
 extern PlayState* gPlayState;
+// FD (2026-07-14): the FD mask's get-item uses this custom draw func (its gid is the Goron-mask flow-gate id, so
+// remotes can't tell it apart by gid alone); we sync a bit when the local player is holding it up.
+void FierceDeity_DrawGiMask(PlayState* play, GetItemEntry* getItemEntry);
 }
 
 /**
@@ -66,6 +71,18 @@ void Anchor::SendPacket_PlayerUpdate() {
     payload["unk_862"] = player->unk_862;
     payload["unk_85C"] = player->unk_85C;
     payload["actionVar1"] = player->av1.actionVar1;
+    // FD (2026-07-12): Fierce Deity transform-cutscene state so remotes see the mask donning/scream + morph.
+    payload["fdStateFlags3"] = player->stateFlags3;
+    payload["fdTransformTargetForm"] = player->transformTargetForm;
+    payload["fdTransformPrevForm"] = player->transformPreviousForm;
+    payload["fdTransformAnim"] = Player_GetFdTransformAnimId(player);
+    payload["fdTransformCurFrame"] = player->skelAnime.curFrame;
+    payload["fdTransformMod2"] = player->transformMatrixModifiers[2];
+    payload["fdTransformMod3"] = player->transformMatrixModifiers[3];
+    payload["fdTransformTimer2"] = player->transformEventTimer2;
+    // FD (2026-07-14): true while this player is holding up the FD mask get-item, so remotes draw the FD mask model
+    // (via its custom draw func) instead of the raw Goron mask its gid maps to.
+    payload["fdMaskGi"] = (player->unk_862 > 0) && (player->getItemEntry.drawFunc == FierceDeity_DrawGiMask);
     payload["quiet"] = true;
 
     for (auto& [clientId, client] : clients) {
@@ -113,5 +130,15 @@ void Anchor::HandlePacket_PlayerUpdate(nlohmann::json payload) {
         client.unk_862 = payload.value("unk_862", (s16)0);
         client.unk_85C = payload.value("unk_85C", (f32)0);
         client.actionVar1 = payload.value("actionVar1", (s8)0);
+        // FD (2026-07-12): Fierce Deity transform-cutscene state (defaults keep pre-FD clients / non-FD frames inert).
+        client.fdStateFlags3 = payload.value("fdStateFlags3", (u16)0);
+        client.fdTransformTargetForm = payload.value("fdTransformTargetForm", (u8)0);
+        client.fdTransformPrevForm = payload.value("fdTransformPrevForm", (u8)0);
+        client.fdTransformAnim = payload.value("fdTransformAnim", (u8)0);
+        client.fdTransformCurFrame = payload.value("fdTransformCurFrame", (f32)0);
+        client.fdTransformMod2 = payload.value("fdTransformMod2", (f32)0);
+        client.fdTransformMod3 = payload.value("fdTransformMod3", (f32)0);
+        client.fdTransformTimer2 = payload.value("fdTransformTimer2", (s16)0);
+        client.fdMaskGi = payload.value("fdMaskGi", false);
     }
 }

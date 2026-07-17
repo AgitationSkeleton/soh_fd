@@ -2,6 +2,7 @@
 #define NAMETAG_H
 
 #include <libultraship/color.h>
+#include <libultraship/libultra.h>
 
 struct Actor;
 

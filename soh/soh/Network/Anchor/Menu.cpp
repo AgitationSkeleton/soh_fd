@@ -1,4 +1,5 @@
 #include "Anchor.h"
+#include <libultraship/libultraship.h>
 #include "soh/SohGui/SohGui.hpp"
 #include "soh/SohGui/SohMenu.h"
 #include "soh/util.h"
@@ -96,6 +97,10 @@ void AnchorMainMenu(WidgetInfo& info) {
     ImGui::EndDisabled();
 
     ImGui::Spacing();
+
+    // FD (2026-07-15): the "Require Matching Game Build" checkbox was removed -- Anchor already version-gates every
+    // state-changing packet (items/flags/checks), and the cosmetic PLAYER_UPDATE sync across builds is harmless, so
+    // the extra gate was redundant.
 
     ImGui::BeginDisabled(!isFormValid);
     const char* buttonLabel = anchor->isEnabled ? "Disable" : "Enable";
@@ -242,6 +247,7 @@ void AnchorInstructionsMenu(WidgetInfo& info) {
         "the same randomizer seed, while players on different teams can use different seeds.");
 }
 
+#ifdef ENABLE_REMOTE_CONTROL
 void RegisterAnchorMenu() {
     WidgetPath path = { "Network", "Anchor", SECTION_COLUMN_1 };
     SohGui::mSohMenu->AddWidget(path, "AnchorMainMenu", WIDGET_CUSTOM)
@@ -257,3 +263,4 @@ void RegisterAnchorMenu() {
 }
 
 static RegisterMenuInitFunc menuInitFunc(RegisterAnchorMenu);
+#endif

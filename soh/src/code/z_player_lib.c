@@ -1,11 +1,12 @@
 #include "global.h"
+#include <string.h> // FD (2026-07-12): strcmp for Player_AnimIsByName (mask-cutscene anim detection by path content)
 #include "objects/gameplay_keep/gameplay_keep.h"
 #include "objects/gameplay_field_keep/gameplay_field_keep.h"
 #include "objects/object_link_boy/object_link_boy.h"
 #include "objects/object_link_child/object_link_child.h"
+#include "objects/object_link_deity/object_link_deity.h" // Fierce Deity (aegiker RE->SoH port 2026-07-11)
 #include "overlays/actors/ovl_Demo_Effect/z_demo_effect.h"
 
-#include <libultraship/bridge/resourcebridge.h>
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/Enhancements/randomizer/draw.h"
@@ -23,7 +24,9 @@ typedef struct {
     /* 0x04 */ Vec3f pos;
 } BowStringData; // size = 0x10
 
-FlexSkeletonHeader* gPlayerSkelHeaders[] = { &gLinkAdultSkel, &gLinkChildSkel };
+// Index by gSaveContext.linkAge (LINK_AGE_ADULT/CHILD/DEITY). DEITY resolves to the FD skeleton
+// resource in fd.o2r (objects/object_link_boy/gLinkFierceDeitySkel). aegiker RE->SoH port 2026-07-11.
+FlexSkeletonHeader* gPlayerSkelHeaders[] = { &gLinkAdultSkel, &gLinkChildSkel, &gLinkFierceDeitySkel };
 
 s16 sBootData[PLAYER_BOOTS_MAX][17] = {
     { 200, 1000, 300, 700, 550, 270, 600, 350, 800, 600, -100, 600, 590, 750, 125, 200, 130 },
@@ -164,250 +167,344 @@ u8 gPlayerModelTypes[PLAYER_MODELGROUP_MAX][PLAYER_MODELGROUPENTRY_MAX] = {
       PLAYER_MODELTYPE_WAIST },
 };
 
-Gfx* sPlayerRightHandShieldDLs[PLAYER_SHIELD_MAX * 4] = {
+Gfx* sPlayerRightHandShieldDLs[PLAYER_SHIELD_MAX * (NUM_DL_FORMS * 2)] = { // FD (2026-07-11): widened 4->6 stride
     // PLAYER_SHIELD_NONE
     gLinkAdultRightHandClosedNearDL,
     gLinkChildRightHandClosedNearDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     gLinkAdultRightHandClosedFarDL,
     gLinkChildRightHandClosedFarDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     // PLAYER_SHIELD_DEKU
     gLinkAdultRightHandClosedNearDL,
     gLinkChildRightFistAndDekuShieldNearDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     gLinkAdultRightHandClosedFarDL,
     gLinkChildRightFistAndDekuShieldFarDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     // PLAYER_SHIELD_HYLIAN
     gLinkAdultRightHandHoldingHylianShieldNearDL,
     gLinkChildRightHandClosedNearDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     gLinkAdultRightHandHoldingHylianShieldFarDL,
     gLinkChildRightHandClosedFarDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     // PLAYER_SHIELD_MIRROR
     gLinkAdultRightHandHoldingMirrorShieldNearDL,
     gLinkChildRightHandClosedNearDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     gLinkAdultRightHandHoldingMirrorShieldFarDL,
     gLinkChildRightHandClosedFarDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
 };
 
-Gfx* sSheathWithSwordDLs[(PLAYER_SHIELD_MAX + 2) * 4] = {
+Gfx* sSheathWithSwordDLs[(PLAYER_SHIELD_MAX + 2) * (NUM_DL_FORMS * 2)] = { // FD (2026-07-11): widened 4->6 stride
     // PLAYER_SHIELD_NONE
     gLinkAdultMasterSwordAndSheathNearDL,
     gLinkChildSwordAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD has no sheath
     gLinkAdultMasterSwordAndSheathFarDL,
     gLinkChildSwordAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_DEKU
     gLinkAdultMasterSwordAndSheathNearDL,
     gLinkChildDekuShieldSwordAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultMasterSwordAndSheathFarDL,
     gLinkChildDekuShieldSwordAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_HYLIAN
     gLinkAdultHylianShieldSwordAndSheathNearDL,
     gLinkChildHylianShieldSwordAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultHylianShieldSwordAndSheathFarDL,
     gLinkChildHylianShieldSwordAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_MIRROR
     gLinkAdultMirrorShieldSwordAndSheathNearDL,
     gLinkChildSwordAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultMirrorShieldSwordAndSheathFarDL,
     gLinkChildSwordAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_NONE (child, no sword)
     NULL,
     NULL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     NULL,
     NULL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_DEKU (child, no sword)
     NULL,
     gLinkChildDekuShieldWithMatrixDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     NULL,
     gLinkChildDekuShieldWithMatrixDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
-Gfx* sSheathWithoutSwordDLs[(PLAYER_SHIELD_MAX + 2) * 4] = {
+Gfx* sSheathWithoutSwordDLs[(PLAYER_SHIELD_MAX + 2) * (NUM_DL_FORMS * 2)] = { // FD (2026-07-11): widened 4->6 stride
     // PLAYER_SHIELD_NONE
     gLinkAdultSheathNearDL,
     gLinkChildSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD has no sheath
     gLinkAdultSheathFarDL,
     gLinkChildSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_DEKU
     gLinkAdultSheathNearDL,
     gLinkChildDekuShieldAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultSheathFarDL,
     gLinkChildDekuShieldAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_HYLIAN
     gLinkAdultHylianShieldAndSheathNearDL,
     gLinkChildHylianShieldAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultHylianShieldAndSheathFarDL,
     gLinkChildHylianShieldAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_MIRROR
     gLinkAdultMirrorShieldAndSheathNearDL,
     gLinkChildSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultMirrorShieldAndSheathFarDL,
     gLinkChildSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_NONE (child, no sword)
     NULL,
     NULL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     NULL,
     NULL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     // PLAYER_SHIELD_DEKU (child, no sword)
     gLinkAdultSheathNearDL,
     gLinkChildDekuShieldWithMatrixDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultSheathNearDL,
     gLinkChildDekuShieldWithMatrixDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
-Gfx* gPlayerLeftHandBgsDLs[] = {
+Gfx* gPlayerLeftHandBgsDLs[] = { // FD (2026-07-11): widened 4->6 stride + FD-sword sub-block
     // Biggoron Sword
     gLinkAdultLeftHandHoldingBgsNearDL,
     gLinkChildLeftHandHoldingMasterSwordDL,
+    gLinkFierceDeityLeftHandHoldingSwordDL, // FD (2026-07-11): blade baked in, no separate sword DL
     gLinkAdultLeftHandHoldingBgsFarDL,
     gLinkChildLeftHandHoldingMasterSwordDL,
+    gLinkFierceDeityLeftHandHoldingSwordDL, // FD (2026-07-11)
     // Broken Giant's Knife
     gLinkAdultHandHoldingBrokenGiantsKnifeDL,
     gLinkChildLeftHandHoldingMasterSwordDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD sword never breaks
     gLinkAdultHandHoldingBrokenGiantsKnifeFarDL,
     gLinkChildLeftHandHoldingMasterSwordDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
+    // Fierce Deity sword (selected by 3g offset when holding the deity sword). FD-form-only: the
+    // adult/child "FD-sword-in-a-human-hand" DLs are absent from object_link_deity.h, so they are NULL;
+    // only the deity slot is ever read at linkAge==LINK_AGE_DEITY.
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): gLinkAdultFierceDeityLeftHandHoldingSwordDL absent
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): gLinkChildFierceDeityLeftHandHoldingSwordDL absent
+    gLinkFierceDeityLeftHandHoldingSwordDL, // FD (2026-07-11)
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
+    gLinkFierceDeityLeftHandHoldingSwordDL, // FD (2026-07-11)
 };
 
+// FD (2026-07-11): all DL-group arrays below widened adult,child -> adult,child,DEITY (near then far),
+// stride NUM_DL_FORMS (3). FD-form entries per FD_PORT_SPEC.md Group 3b.
 Gfx* gPlayerLeftHandOpenDLs[] = {
     gLinkAdultLeftHandNearDL,
     gLinkChildLeftHandNearDL,
+    gLinkFierceDeityLeftHandDL, // FD (2026-07-11)
     gLinkAdultLeftHandFarDL,
     gLinkChildLeftHandFarDL,
+    gLinkFierceDeityLeftHandDL, // FD (2026-07-11)
 };
 
 Gfx* gPlayerLeftHandClosedDLs[] = {
     gLinkAdultLeftHandClosedNearDL,
     gLinkChildLeftFistNearDL,
+    gLinkFierceDeityLeftHandDL, // FD (2026-07-11)
     gLinkAdultLeftHandClosedFarDL,
     gLinkChildLeftFistFarDL,
+    gLinkFierceDeityLeftHandDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerLeftHandSwordDLs2[] = {
     gLinkAdultLeftHandHoldingMasterSwordNearDL,
     gLinkChildLeftFistAndKokiriSwordNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD sword baked into holding-sword DL, no separate left-hand-sword DL
     gLinkAdultLeftHandHoldingMasterSwordFarDL,
     gLinkChildLeftFistAndKokiriSwordFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerLeftHandSwordDLs[] = {
     gLinkAdultLeftHandHoldingMasterSwordNearDL,
     gLinkChildLeftFistAndKokiriSwordNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultLeftHandHoldingMasterSwordFarDL,
     gLinkChildLeftFistAndKokiriSwordFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerRightHandOpenDLs[] = {
     gLinkAdultRightHandNearDL,
     gLinkChildRightHandNearDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     gLinkAdultRightHandFarDL,
     gLinkChildRightHandFarDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerRightHandClosedDLs[] = {
     gLinkAdultRightHandClosedNearDL,
     gLinkChildRightHandClosedNearDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
     gLinkAdultRightHandClosedFarDL,
     gLinkChildRightHandClosedFarDL,
+    gLinkFierceDeityRightHandDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerRightHandBowSlingshotDLs[] = {
     gLinkAdultRightHandHoldingBowNearDL,
     gLinkChildRightHandHoldingSlingshotNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD has no bow/slingshot
     gLinkAdultRightHandHoldingBowFarDL,
     gLinkChildRightHandHoldingSlingshotFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sSwordAndSheathDLs[] = {
     gLinkAdultMasterSwordAndSheathNearDL,
     gLinkChildSwordAndSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD has no sheath
     gLinkAdultMasterSwordAndSheathFarDL,
     gLinkChildSwordAndSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sSheathDLs[] = {
     gLinkAdultSheathNearDL,
     gLinkChildSheathNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11): FD has no sheath
     gLinkAdultSheathFarDL,
     gLinkChildSheathFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerWaistDLs[] = {
     gLinkAdultWaistNearDL,
     gLinkChildWaistNearDL,
+    gLinkFierceDeityWaistDL, // FD (2026-07-11)
     gLinkAdultWaistFarDL,
     gLinkChildWaistFarDL,
+    gLinkFierceDeityWaistDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerRightHandBowSlingshotDLs2[] = {
     gLinkAdultRightHandHoldingBowNearDL,
     gLinkChildRightHandHoldingSlingshotNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultRightHandHoldingBowFarDL,
     gLinkChildRightHandHoldingSlingshotFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerRightHandOcarinaDLs[] = {
     gLinkAdultRightHandHoldingOotNearDL,
     gLinkChildRightHandHoldingFairyOcarinaNearDL,
-    gLinkAdultRightHandHoldingOotFarDL,
-    gLinkChildRightHandHoldingFairyOcarinaFarDL,
+    // FD (2026-07-13) SELF-CONTAINED ocarina: the deity slots draw FD's OWN right hand (gLinkFierceDeityRightHandDL,
+    // part of the always-loaded FD model, so it has FD's real pale hand texture -- the earlier patched-adult-hand DL
+    // rendered adult/peachy skin because it kept adult hand tex/TLUT); the correct ocarina mesh -- Fairy OR OoT,
+    // extracted from BASE geometry into fd.o2r -- is drawn on top in Player_PostLimbDrawGameplay based on which
+    // ocarina is equipped. So FD holds the right ocarina with his own hand out of the gate.
+    gLinkFierceDeityRightHandDL, // [2] DEITY near -- FD's own hand (correct texture)
+    gLinkAdultRightHandHoldingOotFarDL,        // [3] adult far
+    gLinkChildRightHandHoldingFairyOcarinaFarDL, // [4] child far
+    gLinkFierceDeityRightHandDL,  // [5] DEITY far -- FD's own hand (correct texture)
 };
 
 Gfx* sPlayerRightHandOotDLs[] = {
     gLinkAdultRightHandHoldingOotNearDL,
     gLinkChildRightHandAndOotNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultRightHandHoldingOotFarDL,
     gLinkChildRightHandHoldingOOTFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerRightHandHookshotDLs[] = {
     gLinkAdultRightHandHoldingHookshotNearDL,
     gLinkChildRightHandNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultRightHandHoldingHookshotNearDL, // The 'far' display list exists but is not used
     gLinkChildRightHandFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerLeftHandHammerDLs[] = {
     gLinkAdultLeftHandHoldingHammerNearDL,
     gLinkChildLeftHandNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultLeftHandHoldingHammerFarDL,
     gLinkChildLeftHandFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* gPlayerLeftHandBoomerangDLs[] = {
     gLinkAdultLeftHandNearDL,
     gLinkChildLeftFistAndBoomerangNearDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
     gLinkAdultLeftHandFarDL,
     gLinkChildLeftFistAndBoomerangFarDL,
+    gLinkFierceDeityEmptyDL, // FD (2026-07-11)
 };
 
 Gfx* sPlayerLeftHandBottleDLs[] = {
     gLinkAdultLeftHandOutNearDL,
     gLinkChildLeftHandUpNearDL,
+    gLinkFierceDeityLeftHandDL, // FD (2026-07-11): FD holds bottle with plain left hand (hold-bottle DL unused)
     gLinkAdultLeftHandOutNearDL,
     gLinkChildLeftHandUpNearDL,
+    gLinkFierceDeityLeftHandDL, // FD (2026-07-11)
 };
 
+// FD (2026-07-11): first-person limb arrays are indexed directly by gSaveContext.linkAge (per-form),
+// so they need one DEITY entry (index 2). FD is never in first-person weapon-aim in the FD-only port;
+// DEITY = copy of adult per FD_PORT_SPEC.md 3c (SOURCE ships NULL here -- see report note).
 Gfx* sFirstPersonLeftForearmDLs[] = {
     gLinkAdultRightArmOutNearDL,
     NULL,
+    gLinkAdultRightArmOutNearDL, // FD (2026-07-11): DEITY = adult
 };
 
 Gfx* sFirstPersonLeftHandDLs[] = {
     gLinkAdultRightHandOutNearDL,
     NULL,
+    gLinkAdultRightHandOutNearDL, // FD (2026-07-11): DEITY = adult
 };
 
 Gfx* sFirstPersonRightShoulderDLs[] = {
     gLinkAdultRightShoulderNearDL,
     gLinkChildRightShoulderNearDL,
+    gLinkAdultRightShoulderNearDL, // FD (2026-07-11): DEITY = adult
 };
 
 Gfx* sFirstPersonForearmDLs[] = {
     gLinkAdultLeftArmOutNearDL,
     NULL,
+    gLinkAdultLeftArmOutNearDL, // FD (2026-07-11): DEITY = adult
 };
 
 Gfx* sFirstPersonRightHandHoldingWeaponDLs[] = {
     gLinkAdultRightHandHoldingBowFirstPersonDL,
     gLinkChildRightArmStretchedSlingshotDL,
+    gLinkAdultRightHandHoldingBowFirstPersonDL, // FD (2026-07-11): DEITY = adult
 };
 
 // Indexed by model types (left hand, right hand, sheath or waist)
@@ -492,6 +589,29 @@ void Player_SetBootData(PlayState* play, Player* this) {
 
     if (play->roomCtx.curRoom.behaviorType1 == ROOM_BEHAVIOR_TYPE1_2) {
         REG(45) = 500;
+    }
+
+    // FD (2026-07-13): Fierce Deity walk/gait -- matches 2ship's dedicated FD boot registers
+    // (mm/src/code/z_player_lib.c D_801BFE14 FD row): a HIGHER run-speed cap (10.0 vs human ~5.5) paired with
+    // ~HALVED leg-cadence multipliers, so FD's 1.5x body takes long strides at a calm leg cycle instead of the
+    // frantic adult-cadence gait. Same skeleton/animations as before -- only these REGs change. Now always on (the
+    // previous compromise + its toggle were retired). FD-ONLY: this whole block only runs for LINK_IS_DEITY; adult/
+    // child keep the boot-table REGs loaded above. The paired run-cadence BASE (1.2 -> 0.6) lives at the two
+    // func_8084029C run sites in z_player.c -- the run cadence base is hardcoded there rather than a boot REG.
+    if (LINK_IS_DEITY) {
+        REG(45) = 1000; // R_RUN_SPEED_LIMIT: 10.0 run cap (2ship FD)
+        REG(35) = 366;  // walk cadence base       (2ship FD)
+        REG(36) = 200;  // walk cadence x speed     (2ship FD; ~half of human)
+        REG(38) = 175;  // run cadence x speed      (2ship FD; ~half of human)
+        REG(30) = 666;  // sidestep cadence base    (2ship FD)
+        REG(32) = 200;  // sidestep cadence x speed (2ship FD)
+        MREG(95) = 65;  // bow / side-walk anim playSpeed (2ship FD)
+        REG(27) = 1200; // turn-rate step: FD turns a touch slower (2ship FD)
+        if (play->roomCtx.curRoom.behaviorType1 == ROOM_BEHAVIOR_TYPE1_2) {
+            REG(45) = 500; // indoor cap, same as human (2ship)
+        }
+        // FALLBACK (retired): the previous behavior was a single compromise cap with adult cadence REGs untouched:
+        //     REG(45) = 700;
     }
 }
 
@@ -678,6 +798,16 @@ void func_8008EC70(Player* this) {
 void Player_SetEquipmentData(PlayState* play, Player* this) {
     if (this->csAction != 0x56) {
         this->currentShield = SHIELD_EQUIP_TO_PLAYER(CUR_EQUIP_VALUE(EQUIP_TYPE_SHIELD));
+        // FD (2026-07-11) bug 4: the Fierce Deity has NO shield -- ignore whatever shield the underlying age has
+        // equipped so no shield model is ever drawn and the crouch-guard (which requires currentShield != NONE)
+        // can never engage; FD uses its standing brace instead. In the RE this falls out of the deity model asset
+        // (object_link_deity carries no shield geometry); forcing PLAYER_SHIELD_NONE is the code-side equivalent
+        // for SoH, which loads the FD skeleton from mm.o2r. currentShield is recomputed from equips here on every
+        // equip change, so reverting to human restores the real shield automatically.
+        // TODO 2ship setting: a future toggle could let FD keep the underlying age's shield.
+        if (LINK_IS_DEITY) {
+            this->currentShield = PLAYER_SHIELD_NONE;
+        }
         this->currentTunic = TUNIC_EQUIP_TO_PLAYER(CUR_EQUIP_VALUE(EQUIP_TYPE_TUNIC));
         this->currentBoots = BOOTS_EQUIP_TO_PLAYER(CUR_EQUIP_VALUE(EQUIP_TYPE_BOOTS));
         this->currentSwordItemId = B_BTN_ITEM;
@@ -694,9 +824,7 @@ void Player_UpdateBottleHeld(PlayState* play, Player* this, s32 item, s32 action
         this->heldItemAction = actionParam;
     }
 
-    if (GameInteractor_Should(VB_PLAYER_UPDATE_BOTTLE_HELD, true, this)) {
-        this->itemAction = actionParam;
-    }
+    this->itemAction = actionParam;
 }
 
 void Player_ReleaseLockOn(Player* this) {
@@ -710,7 +838,7 @@ void Player_ReleaseLockOn(Player* this) {
  * TODO: Learn more about this and give a name to PLAYER_STATE1_19
  */
 void Player_ClearZTargeting(Player* this) {
-    if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
+    if ((this->actor.bgCheckFlags & 1) ||
         (this->stateFlags1 & (PLAYER_STATE1_CLIMBING_LADDER | PLAYER_STATE1_ON_HORSE | PLAYER_STATE1_IN_WATER)) ||
         (!(this->stateFlags1 & (PLAYER_STATE1_JUMPING | PLAYER_STATE1_FREEFALL)) &&
          ((this->actor.world.pos.y - this->actor.floorHeight) < 100.0f))) {
@@ -776,6 +904,13 @@ s32 Player_IsBurningStickInRange(PlayState* play, Vec3f* pos, f32 xzRange, f32 y
 
 s32 Player_GetStrength(void) {
     s32 strengthUpgrade = CUR_UPG_VALUE(UPG_STRENGTH);
+
+    // FD (2026-07-12) #9b: Fierce Deity has GOLD-gauntlet lifting strength (RE fd_build z_player_lib.c:963-965
+    // returns PLAYER_STR_GOLD_G). OFF by default behind the cheat; when off, FD falls through to the normal
+    // age/upgrade path below (no strength buff).
+    if (LINK_IS_DEITY && CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdIncreasedStrength"), 0)) {
+        return PLAYER_STR_GOLD_G;
+    }
 
     if (CVarGetInteger(CVAR_ENHANCEMENT("ToggleStrength"), 0) &&
         CVarGetInteger(CVAR_ENHANCEMENT("StrengthDisabled"), 0)) {
@@ -874,6 +1009,9 @@ s32 Player_HoldsTwoHandedWeapon(Player* this) {
 }
 
 s32 Player_HoldsBrokenKnife(Player* this) {
+    if (this->heldItemId == ITEM_SWORD_DEITY) { // FD (2026-07-11): the deity sword never counts as broken
+        return false;
+    }
     return (this->heldItemAction == PLAYER_IA_SWORD_BIGGORON) && (gSaveContext.swordHealth <= 0.0f);
 }
 
@@ -930,7 +1068,7 @@ s32 Player_GetEnvironmentalHazard(PlayState* play) {
         envHazard = PLAYER_ENV_HAZARD_HOTROOM - 1;
     } else if ((this->underwaterTimer > 80) &&
                ((this->currentBoots == PLAYER_BOOTS_IRON) || (this->underwaterTimer >= 300))) { // Deep underwater
-        envHazard = ((this->currentBoots == PLAYER_BOOTS_IRON) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND))
+        envHazard = ((this->currentBoots == PLAYER_BOOTS_IRON) && (this->actor.bgCheckFlags & 1))
                         ? (PLAYER_ENV_HAZARD_UNDERWATER_FLOOR - 1)
                         : (PLAYER_ENV_HAZARD_UNDERWATER_FREE - 1);
     } else if (this->stateFlags1 & PLAYER_STATE1_IN_WATER) { // Swimming
@@ -974,11 +1112,13 @@ u8 sEyeMouthIndexes[][2] = {
 
 #if defined(MODDING) || defined(_MSC_VER) || defined(__GNUC__)
 // TODO: Formatting
-void* sEyeTextures[2][8] = {
+void* sEyeTextures[3][8] = { // FD (2026-07-11): +DEITY row
     { gLinkAdultEyesOpenTex, gLinkAdultEyesHalfTex, gLinkAdultEyesClosedfTex, gLinkAdultEyesRollLeftTex,
       gLinkAdultEyesRollRightTex, gLinkAdultEyesShockTex, gLinkAdultEyesUnk1Tex, gLinkAdultEyesUnk2Tex },
     { gLinkChildEyesOpenTex, gLinkChildEyesHalfTex, gLinkChildEyesClosedfTex, gLinkChildEyesRollLeftTex,
       gLinkChildEyesRollRightTex, gLinkChildEyesShockTex, gLinkChildEyesUnk1Tex, gLinkChildEyesUnk2Tex },
+    // FD (2026-07-11): deity face DL does not sample seg-8 (Aegiker ships all NULL)
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
 };
 
 #else
@@ -989,7 +1129,7 @@ void* sEyeTextures[] = {
 #endif
 
 #if defined(MODDING) || defined(_MSC_VER) || defined(__GNUC__)
-void* sMouthTextures[2][4] = {
+void* sMouthTextures[3][4] = { // FD (2026-07-11): +DEITY row
     {
         gLinkAdultMouth1Tex,
         gLinkAdultMouth2Tex,
@@ -1001,6 +1141,13 @@ void* sMouthTextures[2][4] = {
         gLinkChildMouth2Tex,
         gLinkChildMouth3Tex,
         gLinkChildMouth4Tex,
+    },
+    // FD (2026-07-11): deity face DL does not sample seg-9 (Aegiker ships all NULL)
+    {
+        NULL,
+        NULL,
+        NULL,
+        NULL,
     },
 };
 #else
@@ -1088,7 +1235,7 @@ void Player_DrawImpl(PlayState* play, void** skeleton, Vec3s* jointTable, s32 dL
         lod = 0;
     }
 
-    sDListsLodOffset = lod * 2;
+    sDListsLodOffset = lod * NUM_DL_FORMS; // FD (2026-07-11): DL groups now stride 3 forms per LOD
 
     SkelAnime_DrawFlexLod(play, skeleton, jointTable, dListCount, overrideLimbDraw, postLimbDraw, data, lod);
 
@@ -1130,7 +1277,7 @@ void Player_DrawImpl(PlayState* play, void** skeleton, Vec3s* jointTable, s32 dL
                 gSPDisplayList(POLY_OPA_DISP++, bootDLists[0]);
                 gSPDisplayList(POLY_OPA_DISP++, bootDLists[1]);
             }
-        } else {
+        } else if (LINK_IS_CHILD) { // FD (2026-07-11): was `else`; guard so DEITY skips child-bracelet seg-6 DL
             if (Player_GetStrength() > PLAYER_STR_NONE) {
                 gSPDisplayList(POLY_OPA_DISP++, gLinkChildGoronBraceletDL);
             }
@@ -1142,15 +1289,17 @@ void Player_DrawImpl(PlayState* play, void** skeleton, Vec3s* jointTable, s32 dL
 
 Vec3f sZeroVec = { 0.0f, 0.0f, 0.0f };
 
+// FD (2026-07-11): leg-IK tables widened +DEITY (= adult values; FD is adult-proportioned).
 Vec3f D_80126038[] = {
     { 1304.0f, 0.0f, 0.0f },
     { 695.0f, 0.0f, 0.0f },
+    { 1304.0f, 0.0f, 0.0f }, // FD (2026-07-11): deity = adult
 };
 
-f32 D_80126050[] = { 1265.0f, 826.0f };
-f32 D_80126058[] = { SQ(13.04f), SQ(6.95f) };
-f32 D_80126060[] = { 10.019104f, -19.925102f };
-f32 D_80126068[] = { 5.0f, 3.0f };
+f32 D_80126050[] = { 1265.0f, 826.0f, 1265.0f }; // FD (2026-07-11): deity = adult
+f32 D_80126058[] = { SQ(13.04f), SQ(6.95f), SQ(13.04f) }; // FD (2026-07-11): deity = adult
+f32 D_80126060[] = { 10.019104f, -19.925102f, 10.019104f }; // FD (2026-07-11): deity = adult
+f32 D_80126068[] = { 5.0f, 3.0f, 5.0f }; // FD (2026-07-11): deity = adult
 
 Vec3f D_80126070 = { 0.0f, -300.0f, 0.0f };
 
@@ -1237,7 +1386,7 @@ void func_8008F87C(PlayState* play, Player* this, SkelAnime* skelAnime, Vec3f* p
             skelAnime->jointTable[shinLimbIndex].z = skelAnime->jointTable[shinLimbIndex].z + temp1;
             skelAnime->jointTable[footLimbIndex].z = skelAnime->jointTable[footLimbIndex].z + temp2 - temp1;
 
-            temp3 = SurfaceType_GetFloorType(&play->colCtx, sp88, sp84);
+            temp3 = func_80041D4C(&play->colCtx, sp88, sp84);
 
             if ((temp3 >= 2) && (temp3 < 4) && !SurfaceType_IsWallDamage(&play->colCtx, sp88, sp84)) {
                 footprintPos.y = sp80;
@@ -1291,7 +1440,15 @@ s32 Player_OverrideLimbDrawGameplayCommon(PlayState* play, s32 limbIndex, Gfx** 
         sRightHandType = this->rightHandType;
         D_80160000 = &this->meleeWeaponInfo[2].base;
 
-        if (!LINK_IS_ADULT) {
+        // FD (2026-07-12): faithful port of the RE root-limb scale gate (fd_build z_player_lib.c:1432).
+        // Vanilla shrinks the root (pelvis) translation by 0.64 for every non-adult, which WRONGLY
+        // includes Fierce Deity (LINK_AGE_DEITY=2 satisfies !LINK_IS_ADULT) -> pelvis dropped ~18 world
+        // units -> crouched legs + sunken feet. The RE excludes DEITY entirely and picks a form-aware
+        // scale (>= GORON uses ageProperties->unk_08, else child's 0.64). This grounds FD at yOffset=0
+        // and replaces the old shape.yOffset=900 compensation hack (removed in z_player.c).
+        // SoH has only ADULT/CHILD/DEITY (no goron/zora/deku forms), so the RE's form-aware rootScale
+        // (>= GORON -> ageProperties->unk_08) collapses to child's 0.64. The critical fix is excluding DEITY.
+        if (!LINK_IS_ADULT && !LINK_IS_DEITY) {
             if (!(this->skelAnime.movementFlags & 4) || (this->skelAnime.movementFlags & 1)) {
                 pos->x *= 0.64f;
                 pos->z *= 0.64f;
@@ -1377,8 +1534,11 @@ s32 Player_OverrideLimbDrawGameplayDefault(PlayState* play, s32 limbIndex, Gfx**
         if (limbIndex == PLAYER_LIMB_L_HAND) {
             Gfx** dLists = this->leftHandDLists;
 
-            if ((sLeftHandType == PLAYER_MODELTYPE_LH_BGS) && (gSaveContext.swordHealth <= 0.0f)) {
-                dLists += 4;
+            if ((sLeftHandType == PLAYER_MODELTYPE_LH_BGS) &&
+                (this->lastItem == ITEM_SWORD_DEITY || LINK_IS_DEITY)) {
+                dLists += ((NUM_DL_FORMS * 2) * 2); // FD (2026-07-11): select FD-sword sub-block
+            } else if ((sLeftHandType == PLAYER_MODELTYPE_LH_BGS) && (gSaveContext.swordHealth <= 0.0f)) {
+                dLists += (NUM_DL_FORMS * 2); // FD (2026-07-11): was 4 (broken-knife sub-block)
             } else if ((sLeftHandType == PLAYER_MODELTYPE_LH_BOOMERANG) &&
                        (this->stateFlags1 & PLAYER_STATE1_BOOMERANG_THROWN)) {
                 dLists = &gPlayerLeftHandOpenDLs[gSaveContext.linkAge];
@@ -1394,7 +1554,7 @@ s32 Player_OverrideLimbDrawGameplayDefault(PlayState* play, s32 limbIndex, Gfx**
             Gfx** dLists = this->rightHandDLists;
 
             if (sRightHandType == PLAYER_MODELTYPE_RH_SHIELD) {
-                dLists += this->currentShield * 4;
+                dLists += this->currentShield * (NUM_DL_FORMS * 2); // FD (2026-07-11): was *4
             } else if ((this->rightHandType == PLAYER_MODELTYPE_RH_OPEN) && (this->actor.speedXZ > 2.0f) &&
                        !(this->stateFlags1 & PLAYER_STATE1_IN_WATER)) {
                 dLists = &sPlayerRightHandClosedDLs[gSaveContext.linkAge];
@@ -1406,10 +1566,10 @@ s32 Player_OverrideLimbDrawGameplayDefault(PlayState* play, s32 limbIndex, Gfx**
             Gfx** dLists = this->sheathDLists;
 
             if ((this->sheathType == PLAYER_MODELTYPE_SHEATH_18) || (this->sheathType == PLAYER_MODELTYPE_SHEATH_19)) {
-                dLists += this->currentShield * 4;
+                dLists += this->currentShield * (NUM_DL_FORMS * 2); // FD (2026-07-11): was *4
                 if (!LINK_IS_ADULT && (this->currentShield < PLAYER_SHIELD_HYLIAN) &&
                     (gSaveContext.equips.buttonItems[0] != ITEM_SWORD_KOKIRI)) {
-                    dLists += PLAYER_SHIELD_MAX * 4;
+                    dLists += PLAYER_SHIELD_MAX * (NUM_DL_FORMS * 2); // FD (2026-07-11): was *4
                 }
             } else if (!CVarGetInteger(CVAR_ENHANCEMENT("EquipmentAlwaysVisible"), 0) ||
                        (CVarGetInteger(CVAR_ENHANCEMENT("EquipmentAlwaysVisible"), 0) &&
@@ -1420,7 +1580,7 @@ s32 Player_OverrideLimbDrawGameplayDefault(PlayState* play, s32 limbIndex, Gfx**
                     ((this->sheathType == PLAYER_MODELTYPE_SHEATH_16) ||
                      (this->sheathType == PLAYER_MODELTYPE_SHEATH_17)) &&
                     (gSaveContext.equips.buttonItems[0] != ITEM_SWORD_KOKIRI)) {
-                    dLists = &sSheathWithSwordDLs[PLAYER_SHIELD_MAX * 4];
+                    dLists = &sSheathWithSwordDLs[PLAYER_SHIELD_MAX * (NUM_DL_FORMS * 2)]; // FD (2026-07-11): was *4
                 }
             }
 
@@ -1439,8 +1599,6 @@ s32 Player_OverrideLimbDrawGameplayDefault(PlayState* play, s32 limbIndex, Gfx**
             }
         }
     }
-
-    GameInteractor_Should(VB_PLAYER_OVERRIDE_LIMB_DRAW, true, limbIndex, dList, thisx, play);
 
     if (GameInteractor_InvisibleLinkActive()) {
         this->actor.shape.shadowDraw = NULL;
@@ -1487,9 +1645,6 @@ s32 Player_OverrideLimbDrawGameplayFirstPerson(PlayState* play, s32 limbIndex, G
             *dList = NULL;
         }
     }
-
-    GameInteractor_Should(VB_PLAYER_OVERRIDE_LIMB_DRAW, true, limbIndex, dList, thisx, play);
-
     return false;
 }
 
@@ -1642,6 +1797,12 @@ void Player_DrawGetItemIceTrap(PlayState* play, Player* this, Vec3f* refPos, s32
 void Player_DrawGetItemImpl(PlayState* play, Player* this, Vec3f* refPos, s32 drawIdPlusOne) {
     f32 height = (this->exchangeItemId != EXCH_ITEM_NONE) ? 6.0f : 14.0f;
 
+    // FD (2026-07-12) #10: no item-height lift for FD. An earlier +30 (to reach the head-high camera aim) made the
+    // item float too high above him. The real fix is lowering the get-item CAMERA aim for FD (Camera_KeepOn3 aims at
+    // playerPos.y + Player_GetHeight() = 124 for FD, way above his held item), handled in z_camera.c so the shot
+    // frames his hands + head like adult/child instead of a strip of ceiling. The item stays at its normal
+    // hand-relative position.
+
     OPEN_DISPS(play->state.gfxCtx);
 
     gSegments[6] = VIRTUAL_TO_PHYSICAL(this->giObjectSegment);
@@ -1652,12 +1813,14 @@ void Player_DrawGetItemImpl(PlayState* play, Player* this, Vec3f* refPos, s32 dr
     Matrix_Translate(refPos->x + (3.3f * Math_SinS(this->actor.shape.rot.y)), refPos->y + height,
                      refPos->z + ((3.3f + (IREG(90) / 10.0f)) * Math_CosS(this->actor.shape.rot.y)), MTXMODE_NEW);
     Matrix_RotateZYX(0, play->gameplayFrames * 1000, 0, MTXMODE_APPLY);
-    Matrix_Scale(0.2f, 0.2f, 0.2f, MTXMODE_APPLY);
+    {
+        f32 giScale = (gSaveContext.linkAge == LINK_AGE_DEITY) ? 0.25f : 0.2f; // FD: bigger hands -> slightly larger GI
+        Matrix_Scale(giScale, giScale, giScale, MTXMODE_APPLY);
+    }
 
     if (this->getItemEntry.modIndex == MOD_RANDOMIZER && this->getItemEntry.getItemId == RG_ICE_TRAP) {
         Player_DrawGetItemIceTrap(play, this, refPos, drawIdPlusOne, height);
-    } else if (this->getItemEntry.modIndex == MOD_RANDOMIZER &&
-               (this->getItemEntry.getItemId == RG_TRIFORCE_PIECE || this->getItemEntry.getItemId == RG_TRIFORCE)) {
+    } else if (this->getItemEntry.modIndex == MOD_RANDOMIZER && this->getItemEntry.getItemId == RG_TRIFORCE_PIECE) {
         Randomizer_DrawTriforcePieceGI(play, this->getItemEntry);
     } else if (this->getItemEntry.drawFunc != NULL) {
         this->getItemEntry.drawFunc(play, &this->getItemEntry);
@@ -1741,7 +1904,8 @@ f32 sSwordTypes[] = {
     TRAIL_TYPE_BIGGORON_SWORD, TRAIL_TYPE_REST,         TRAIL_TYPE_HAMMER,
 };
 
-Gfx* sBottleDLists[] = { gLinkAdultBottleDL, gLinkChildBottleDL };
+Gfx* sBottleDLists[] = { gLinkAdultBottleDL, gLinkChildBottleDL,
+                         gLinkFierceDeityBottleDL }; // FD (2026-07-11): +DEITY
 
 Color_RGB8 sBottleColors[] = {
     { 255, 255, 255 }, { 80, 80, 255 },   { 255, 100, 255 }, { 0, 0, 255 }, { 255, 0, 255 },
@@ -1754,6 +1918,7 @@ Vec3f sLeftHandArrowVec3 = { 398.0f, 1419.0f, 244.0f };
 BowStringData sBowStringData[] = {
     { gLinkAdultBowStringDL, { 0.0f, -360.4f, 0.0f } },        // bow
     { gLinkChildSlingshotStringDL, { 606.0f, 236.0f, 0.0f } }, // slingshot
+    { gLinkAdultBowStringDL, { 0.0f, -360.4f, 0.0f } },        // FD (2026-07-11): deity = adult
 };
 
 Vec3f sRightHandLimbModelShieldQuadVertices[] = {
@@ -1779,13 +1944,118 @@ Vec3s sSheathLimbModelShieldOnBackZyxRot = { 0, 0, 0x7FFF };
 Vec3f sLeftRightFootLimbModelFootPos[] = {
     { 200.0f, 300.0f, 0.0f },
     { 200.0f, 200.0f, 0.0f },
+    { 200.0f, 300.0f, 0.0f }, // FD (2026-07-11): deity
 };
+
+// FD (2026-07-11): Fierce Deity sword-beam gate (RE z_player_lib.c:1712 Player_CanUseSwordBeams +
+// Player_CheckZTargeting2). FD (or anyone holding the FD sword) may fire a sword beam whenever Z-targeting.
+// SoH's func_8008E9C4 (the hostile-update Z-target check) is Player_IsZTargetingWithHostileUpdate here.
+extern int Player_IsZTargetingWithHostileUpdate(Player* this);
+
+s32 Player_CheckZTargeting2(Player* this) {
+    // RE flags PLAYER_STATE1_16/17/30 -> SoH FRIENDLY_ACTOR_FOCUS / PARALLEL / LOCK_ON_FORCED_TO_RELEASE.
+    if (this->stateFlags1 &
+        (PLAYER_STATE1_FRIENDLY_ACTOR_FOCUS | PLAYER_STATE1_PARALLEL | PLAYER_STATE1_LOCK_ON_FORCED_TO_RELEASE)) {
+        return 1;
+    }
+    return Player_IsZTargetingWithHostileUpdate(this);
+}
+
+u8 Player_CanUseSwordBeams(Player* this) {
+    if ((LINK_IS_DEITY || this->heldItemId == ITEM_SWORD_DEITY) && (Player_CheckZTargeting2(this))) {
+        return 1;
+    }
+    return 0;
+}
+
+// FD (2026-07-11) bug 7: draw the transform mask HELD IN LINK'S HAND during the put-on / take-off animation,
+// before it snaps onto the face (RE z_player_lib.c Player_DrawMaskInHand ~661, called from the L_HAND limb in
+// Player_PostLimbDrawGameplay). Donning (human, cl_setmask frames 8-11) shows the TARGET form's mask; removing
+// (deity, pz_maskoffstart) shows the PREVIOUS form's mask. FD is the only transform form in this port, so both
+// resolve to the resident gFierceDeityMaskDL (gameplay_keep / fd.o2r), fetched via ResourceMgr exactly like the
+// on-face draw -- no seg-0xA object load. NULL-guarded so an absent resource can never crash.
+// FD (2026-07-12) ★★ROOT-CAUSE FIX for the malformed transform mask: the mask-cutscene animation symbols
+// (gPlayerAnim_cl_setmask/cl_setmaskend/cl_maskoff) are declared `static const char[]` in object_link_deity.h, which
+// is #included by BOTH z_player.c (where the anim is SET) and this file (where the mask draws are GATED). Because
+// `static` = internal linkage, each TU gets its OWN copy at a DIFFERENT address. `skelAnime.animation` stores the
+// pointer from z_player.c's copy, but the draw gates here compared against THIS file's copy -> the pointers never
+// matched -> every mask gate failed for BOTH ages (held never drew, on-face drew from frame 0 over Link's human
+// face = the z-fighting mess, scream never swapped). Fix = compare by PATH STRING CONTENT, exactly what authoritative
+// 2ship does (BEN_ANIM_EQUAL / strcmp) -- immune to the per-TU address difference. `skelAnime.animation` holds the
+// OTR path string during the cutscene; the OTRSigCheck guard avoids a strcmp on a raw (non-OTR) animation header.
+static s32 Player_AnimIsByName(SkelAnime* s, const char* animPath) {
+    return (s->animation != NULL) && (animPath != NULL) && (ResourceMgr_OTRSigCheck((void*)s->animation) != 0) &&
+           (strcmp((const char*)s->animation, animPath) == 0);
+}
+
+static void Player_DrawMaskInHand(PlayState* play, Player* this) {
+    // FD (2026-07-12) ★HELD-MASK ROOT CAUSE (2ship parity audit): the "smeared on the face" bug was the fork adding
+    // gPlayerAnim_pz_maskoffstart to `removing`. MM/2ship/RE use ONLY cl_maskoff for removal (2ship z_player_lib.c
+    // :3668, fd_build:662). pz_maskoffstart fires while Link is still a NON-HUMAN FORM, so the current limb matrix is
+    // the FORM skeleton's hand -- not the human hand the MM Translate(-323.67,412.15,-969.96) constant was authored
+    // for -- so the mask lands off toward the face. Dropping pz_maskoffstart makes the held draw byte-match MM/2ship,
+    // so it can be re-enabled (the earlier default-off cvar gate is removed).
+    s32 removing = Player_AnimIsByName(&this->skelAnime, gPlayerAnim_cl_maskoff);
+    s32 form = removing ? this->transformPreviousForm : this->transformTargetForm;
+    f32 donFrame;
+
+    if (form != LINK_AGE_DEITY) {
+        return; // only the Fierce Deity mask has an in-hand model in this port
+    }
+
+    // FD (2026-07-12) ★HELD-MASK FIX: use the RE's/MM's EXACT narrow cl_setmask [8,12) window. An earlier widening
+    // to [4,20) OVERLAPPED the on-face draw (which fires at curFrame >= 12): during [12,20) BOTH gFierceDeityMaskDL
+    // copies drew -- the on-face one off the HEAD limb and the held one off the L_HAND limb -- and because Link's
+    // hand is raised to his face during those don frames, the held copy Z-fought ON TOP of the face (emitted after
+    // the face in the POLY_OPA stream since L_HAND=0x10 draws after HEAD=0x0B). That is the reported "mask distorts
+    // Link's face texture and never appears in-hand" bug. RE keeps held [8,12) and on-face [12,inf) mutually
+    // EXCLUSIVE (fd_build z_player_lib.c:675 vs :2212) so exactly one mask draws per frame. Revert shows it whole.
+    donFrame = this->skelAnime.curFrame;
+    if (removing ||
+        (LINK_IS_HUMAN && Player_AnimIsByName(&this->skelAnime, gPlayerAnim_cl_setmask) &&
+         (donFrame >= 8.0f) && (donFrame < 12.0f))) {
+        OPEN_DISPS(play->state.gfxCtx);
+        // FD (2026-07-12) ★ROOT-CAUSE FIX: set up the standard opaque render state, exactly like the WORKING
+        // get-item mask draw (FierceDeity_DrawGiMask). Without it, the mask DL inherits the skeleton's skin
+        // RSP/RDP pipeline state (segments 0x08/0x09, skin combiner) and renders INVISIBLE. This was the real
+        // reason the held/on-face/scream masks never appeared (not the DL bake or the frame window).
+        Gfx_SetupDL_25Opa(play->state.gfxCtx);
+        Matrix_Push();
+        // RE hand-hold transform (MM D_801C0970..): Player_DrawMaskInHand Matrix_Translate + MatrixMM_RotateZYX.
+        Matrix_Translate(-323.67f, 412.15f, -969.96f, MTXMODE_APPLY);
+        Matrix_RotateZYX(-0x32BE, -0x50DE, -0x7717, MTXMODE_APPLY);
+        gSPMatrix(POLY_OPA_DISP++, MATRIX_NEWMTX(play->state.gfxCtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+        // FD (2026-07-12) #2: pass the __OTR__ path DIRECTLY to gSPDisplayList (LUS resolves it), exactly like
+        // the working get-item mask draw FierceDeity_DrawGiMask. ResourceMgr_LoadGfxByName returned a bad/NULL
+        // pointer for these DLs (the held mask never drew), so the indirection is removed.
+        gSPDisplayList(POLY_OPA_DISP++, (Gfx*)gFierceDeityMaskDL);
+        Matrix_Pop();
+        CLOSE_DISPS(play->state.gfxCtx);
+    }
+}
 
 void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList, Vec3s* rot, void* thisx) {
     Player* this = (Player*)thisx;
 
+    // FD (2026-07-11) Task 1: the on-face transform mask (gFierceDeityMaskDL / gGiFierceDeityMaskFaceDL) is now
+    // drawn on PLAYER_LIMB_HEAD during the animated mask cutscene, positioned by this->transformMatrixModifiers
+    // (RE z_player.c Player_PostLimbDrawGameplay, matrix emitted to POLY_OPA_DISP). See the PLAYER_LIMB_HEAD block.
+
     if (*dList != NULL) {
         Matrix_MultVec3f(&sZeroVec, D_80160000);
+    }
+
+    // FD (2026-07-13) SELF-CONTAINED ocarina: FD's ocarina R_HAND slot is the BARE FD hand; draw the correct ocarina
+    // (Fairy vs OoT, extracted from base geometry into fd.o2r) on top, at the hand's limb matrix -- exactly where the
+    // base ocarina mesh is authored. Works without the alt-asset customequipment pack, unlike adult/child. Only the
+    // near LOD's slot is the ocarina hand; the far slot is the same bare hand, so this draws for both.
+    if ((limbIndex == PLAYER_LIMB_R_HAND) && LINK_IS_DEITY &&
+        (this->rightHandType == PLAYER_MODELTYPE_RH_OCARINA)) {
+        OPEN_DISPS(play->state.gfxCtx);
+        gSPDisplayList(POLY_OPA_DISP++, (INV_CONTENT(ITEM_OCARINA_FAIRY) == ITEM_OCARINA_FAIRY)
+                                            ? (Gfx*)gFdFairyOcarinaDL
+                                            : (Gfx*)gFdOotOcarinaDL);
+        CLOSE_DISPS(play->state.gfxCtx);
     }
 
     if (limbIndex == PLAYER_LIMB_L_HAND) {
@@ -1793,6 +2063,29 @@ void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList, Ve
         Actor* hookedActor;
 
         Math_Vec3f_Copy(&this->leftHandPos, D_80160000);
+
+        // FD (2026-07-11): keep the melee-weapon tip/base tracking the blade while FD Z-targets but is NOT
+        // swinging, so Player_FierceDeityParticles has fresh blade positions to sparkle from (RE
+        // z_player_lib.c:1728). Mirrors the swing-time func_80090480 update but with meleeWeaponState == 0.
+        if ((Player_CanUseSwordBeams(this) == 1) && (this->meleeWeaponState == 0)) {
+            Vec3f sp124b[3];
+            Vec3f newBasePos[3];
+
+            if (Player_HoldsBrokenKnife(this)) {
+                D_80126080.x = 1500.0f;
+            } else {
+                D_80126080.x = sMeleeWeaponLengths[Player_GetMeleeWeaponHeld(this)];
+            }
+            func_80090A28(this, sp124b);
+            Matrix_MultVec3f(&D_801260A4[0], &newBasePos[0]);
+            Matrix_MultVec3f(&D_801260A4[1], &newBasePos[1]);
+            Matrix_MultVec3f(&D_801260A4[2], &newBasePos[2]);
+            func_80090480(play, NULL, &this->meleeWeaponInfo[0], &sp124b[0], &newBasePos[0]);
+        }
+
+        // FD (2026-07-11) bug 7: draw the held transform mask in-hand during the mask cutscene (RE call site
+        // z_player_lib.c:1997). No-op unless a mask-transform anim is mid-play (guards inside).
+        Player_DrawMaskInHand(play, this);
 
         if (this->itemAction == PLAYER_IA_DEKU_STICK) {
             Vec3f sp124[3];
@@ -1837,10 +2130,8 @@ void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList, Ve
             OPEN_DISPS(play->state.gfxCtx);
 
             gSPMatrix(POLY_XLU_DISP++, MATRIX_NEWMTX(play->state.gfxCtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
-            if (GameInteractor_Should(VB_PLAYER_DRAW_BOTTLE, true, this, play)) {
-                gDPSetEnvColor(POLY_XLU_DISP++, bottleColor->r, bottleColor->g, bottleColor->b, 0);
-                gSPDisplayList(POLY_XLU_DISP++, sBottleDLists[gSaveContext.linkAge]);
-            }
+            gDPSetEnvColor(POLY_XLU_DISP++, bottleColor->r, bottleColor->g, bottleColor->b, 0);
+            gSPDisplayList(POLY_XLU_DISP++, sBottleDLists[(gSaveContext.linkAge)]);
 
             CLOSE_DISPS(play->state.gfxCtx);
         }
@@ -1980,6 +2271,77 @@ void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList, Ve
                 Matrix_Get(&this->shieldMf);
             }
         } else if (limbIndex == PLAYER_LIMB_HEAD) {
+            // FD (2026-07-11) Task 1: draw the transform mask over the human face during the animated
+            // mask-transform cutscene (RE z_player.c Player_PostLimbDrawGameplay, fd_build ~2204-2261). The
+            // matrix is emitted to POLY_OPA_DISP -- NOT OVERLAY_DISP -- so the matrix and geometry stay in one
+            // command stream (the verified RSP-hang crash fix). Driven by PLAYER_STATE3_TRANSFORMATION_MASK +
+            // transformMatrixModifiers[2]/[3] (the squash), which Player_UpdateTransformationAnim ramps.
+            // FD (2026-07-12) #5: the transform "blue vortex" -- a swirling CONICAL cloud model (gTransformEffectDL)
+            // around the face during the close-up, tinted blue, alpha ramping with transformEventTimer2. MM DOES
+            // have this model (an earlier "no swirl model" claim was wrong). It renders on BOTH transform and revert
+            // (gated only by PLAYER_STATE3_TRANSFORMATION_MASK + the timer, not on age). The DL branches to segment
+            // 0x0B for its two-tex cloud scroll (bound below via Gfx_TwoTexScrollEx). Drawn to POLY_XLU. Direct-path
+            // gSPDisplayList -- valid once gTransformEffectDL is a COMPILED binary resource in fd.o2r (it was baked
+            // as uncompiled XML before -> NULL -> nothing drew; the asset bake is being corrected).
+            if ((this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK) && (this->transformEventTimer2 != 0)) {
+                static Vec3f sSwirlFaceOffset[LINK_AGE_MAX] = {
+                    { -230.0f, -520.0f, 0.0f }, // adult (RE D_801C0E40 human offset)
+                    { -230.0f, -520.0f, 0.0f }, // child
+                    { 0.0f, 0.0f, 0.0f },       // deity
+                };
+                Vec3f* off = &sSwirlFaceOffset[gSaveContext.linkAge];
+
+                OPEN_DISPS(play->state.gfxCtx);
+                // FD (2026-07-12) ★ROOT-CAUSE FIX: clean XLU render-state setup (like the working two-tex-scroll
+                // effect GetItem_DrawJewel in z_draw.c) so the cone doesn't inherit the skeleton's skin pipeline
+                // state and render invisible. The 2-cycle + seg-0x0B setup below refines this clean base.
+                Gfx_SetupDL_25Xlu(play->state.gfxCtx);
+                Matrix_Push();
+                // gTransformEffectDL is a 2-cycle effect (dual SetCombineLERP / SetRenderMode) that never sets the
+                // cycle type itself (MM ran it inside a 2-cycle draw). Force 2-cycle so the combiner is well-formed.
+                gDPPipeSync(POLY_XLU_DISP++);
+                gDPSetCycleType(POLY_XLU_DISP++, G_CYC_2CYCLE);
+                // Bind seg 0x0B to the animated two-tex cloud scroll (RE sMaskEffectScroll {{-1,0,16,16},{1,-2,16,16}}).
+                gSPSegment(POLY_XLU_DISP++, 0x0B,
+                           Gfx_TwoTexScrollEx(play->state.gfxCtx, 0, (0 - play->gameplayFrames) % 128, 0, 16, 16, 1,
+                                              (play->gameplayFrames * 1) % 128, (play->gameplayFrames * 2) % 128, 16,
+                                              16, -1, 0, 1, 2));
+                Matrix_Translate(off->x, off->y, 0.0f, MTXMODE_APPLY);
+                gSPMatrix(POLY_XLU_DISP++, MATRIX_NEWMTX(play->state.gfxCtx),
+                          G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+                gDPSetEnvColor(POLY_XLU_DISP++, 0, 0, 255, (u8)this->transformEventTimer2);
+                gSPDisplayList(POLY_XLU_DISP++, (Gfx*)gTransformEffectDL);
+                Matrix_Pop();
+                CLOSE_DISPS(play->state.gfxCtx);
+            }
+            if ((this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK) && LINK_IS_HUMAN &&
+                (this->transformTargetForm == LINK_AGE_DEITY) &&
+                ((!Player_AnimIsByName(&this->skelAnime, gPlayerAnim_cl_setmask)) ||
+                 (this->skelAnime.curFrame >= 12.0f))) {
+                // FD (2026-07-12) ★SCREAM-MASK PARITY (2ship): the on-face draw uses the calm gFierceDeityMaskDL, then
+                // swaps to the open-mouth SCREAM model at the late frames -- MM/2ship's D_801C0B20[FD-1+4] swap: when
+                // (cl_setmask curFrame >= 51) or cl_setmaskend (2ship z_player_lib.c:4049-4056). The scream model is
+                // the face-space object_mask_boy_DL_000900 (gFierceDeityScreamMaskDL), imported from mm.o2r into
+                // fd.o2r. Same head-limb matrix + squash as the calm mask; adult+child both use it (MM has no per-age
+                // branch here -- only the human skeleton's limb matrix differs). (The old gGiFierceDeityMaskFaceDL was
+                // the GET-ITEM pedestal model, wrong coordinate space -> invisible on the face.)
+                s32 scream = ((Player_AnimIsByName(&this->skelAnime, gPlayerAnim_cl_setmask) &&
+                               (this->skelAnime.curFrame >= 51.0f)) ||
+                              Player_AnimIsByName(&this->skelAnime, gPlayerAnim_cl_setmaskend));
+                OPEN_DISPS(play->state.gfxCtx);
+                // Opaque render-state setup (like the working get-item mask draw) so the DL doesn't inherit the
+                // skeleton skin pipeline state and render invisible.
+                Gfx_SetupDL_25Opa(play->state.gfxCtx);
+                // Human on-face offset is {0,0} in MM's D_801C0E04 (the FD mask DL is authored on the face).
+                Matrix_Push();
+                Matrix_Scale(1.0f, 1.0f - this->transformMatrixModifiers[3], 1.0f - this->transformMatrixModifiers[2],
+                             MTXMODE_APPLY);
+                gSPMatrix(POLY_OPA_DISP++, MATRIX_NEWMTX(play->state.gfxCtx),
+                          G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+                Matrix_Pop();
+                gSPDisplayList(POLY_OPA_DISP++, scream ? (Gfx*)gFierceDeityScreamMaskDL : (Gfx*)gFierceDeityMaskDL);
+                CLOSE_DISPS(play->state.gfxCtx);
+            }
             Matrix_MultVec3f(&D_801260D4, &this->actor.focus.pos);
         } else {
             Vec3f* vec = &sLeftRightFootLimbModelFootPos[(gSaveContext.linkAge)];
@@ -2007,6 +2369,42 @@ u32 func_80091738(PlayState* play, u8* segment, SkelAnime* skelAnime) {
     gSegments[4] = VIRTUAL_TO_PHYSICAL(segment + 0x3800);
     gSegments[6] = VIRTUAL_TO_PHYSICAL(segment + 0x8800);
 
+    // FD (2026-07-11) BUG 5: purge stale player skeleton registrations before the pause re-inits the model.
+    //
+    // ROOT CAUSE (a SoH divergence with no N64/RE analogue -- vanilla oot-master z_player_lib.c:1659 just calls
+    // SkelAnime_InitLink here and is done). SoH's SkeletonPatcher keeps a GLOBAL list of every player SkelAnime
+    // that ResourceMgr_LoadSkeletonByName has ever seen (soh/ResourceManagerHelpers.cpp:599), and
+    // SkeletonPatcher::UpdateTunicSkeletons (soh/resource/type/Skeleton.cpp:136) re-points skelAnime->skeleton to
+    // the matching base-age *tunic* skeleton for any entry whose registration PATH is gLinkChildSkel /
+    // gLinkAdultSkel. That patch runs on the OnLinkSkeletonInit and OnLinkEquipmentChange hooks
+    // (soh/Enhancements/cosmetics/CustomSkeletons.cpp:21-22).
+    //
+    // When a child/adult transforms into Fierce Deity, Player_ChangeAge swaps the drawn skeleton to
+    // gLinkFierceDeitySkel but the ORIGINAL base-age registration made by Player_InitCommon is never removed
+    // (RegisterSkeleton only ever pushes; nothing unregisters). Opening the pause calls SkelAnime_InitLink just
+    // below, whose trailing GameInteractor_ExecuteOnLinkSkeletonInit runs UpdateTunicSkeletons, and that stale
+    // base-age entry drags the player's -- and the freshly registered pause -- body limbs back to young/adult
+    // Link. The FD hands + pelvis survive because they are chosen per-frame from the linkAge==LINK_AGE_DEITY DL
+    // override (Player_OverrideLimbDrawPause), not from the skeleton; hence a young-Link body wearing FD hands
+    // on the pause screen and, because this->skelAnime is patched in place, in-game after unpausing. A scene
+    // reload's ResourceMgr_ClearSkeletons wipes the stale entry -- exactly why a level transition undoes it.
+    //
+    // Fierce Deity is never tunic-patched (IsLinkSkeletonPath excludes the FD path), so drop every registration
+    // for the player's skelAnimes and for the pause skelAnime here. Their skeleton pointers already reference the
+    // FD model and are left untouched, so nothing can drag them to a base age. Reverting FD->human re-registers
+    // via Player_ChangeAge, restoring normal tunic patching. ResourceMgr_UnregisterSkeleton removes a single
+    // entry per call, so loop to clear the duplicates that accumulate across repeated in-scene transforms.
+    if (LINK_IS_DEITY) {
+        Player* player = GET_PLAYER(play);
+        s32 i;
+
+        for (i = 0; i < 6; i++) {
+            ResourceMgr_UnregisterSkeleton(&player->skelAnime);
+            ResourceMgr_UnregisterSkeleton(&player->upperSkelAnime);
+            ResourceMgr_UnregisterSkeleton(skelAnime);
+        }
+    }
+
     SkelAnime_InitLink(play, skelAnime, gPlayerSkelHeaders[gSaveContext.linkAge], &gPlayerAnim_link_normal_wait, 9, ptr,
                        ptr, PLAYER_LIMB_MAX);
 
@@ -2028,9 +2426,11 @@ s32 Player_OverrideLimbDrawPause(PlayState* play, s32 limbIndex, Gfx** dList, Ve
     s32 type;
     s32 dListOffset = 0;
     Gfx** dLists;
-    size_t ptrSize = sizeof(uint32_t);
 
-    if ((modelGroup == PLAYER_MODELGROUP_SWORD_AND_SHIELD) && !LINK_IS_ADULT &&
+    // FD (2026-07-11) BUG A: `!LINK_IS_ADULT` here would route Fierce Deity (a non-adult form) to the CHILD
+    // Hylian-shield hand model group. Gate on LINK_IS_CHILD so only true child uses the child-shield group;
+    // deity is treated like adult (it uses the adult-proportioned skeleton).
+    if ((modelGroup == PLAYER_MODELGROUP_SWORD_AND_SHIELD) && LINK_IS_CHILD &&
         (playerSwordAndShield[1] == PLAYER_SHIELD_HYLIAN)) {
         modelGroup = PLAYER_MODELGROUP_CHILD_HYLIAN_SHIELD;
     }
@@ -2045,19 +2445,46 @@ s32 Player_OverrideLimbDrawPause(PlayState* play, s32 limbIndex, Gfx** dList, Ve
             type = PLAYER_MODELTYPE_LH_OPEN;
         }
 
+        // FD (2026-07-11) BUG 13: the pause DL-group arrays were widened from a 2-form (adult,child) near/far
+        // stride of 4 to a 3-form (adult,child,DEITY) near/far stride of NUM_DL_FORMS*2 == 6 (see
+        // gPlayerLeftHandBgsDLs / sPlayerRightHandShieldDLs / sSheathWith*SwordDLs above). This broken-Biggoron
+        // sub-block jump was left at the old literal 4, so it landed mid-block (into the deity near/far slots)
+        // instead of the broken-knife block at +6. Use NUM_DL_FORMS*2, matching the in-game path
+        // (Player_OverrideLimbDrawGameplayDefault, this file @ the `dLists += this->currentShield * (NUM_DL_FORMS
+        // * 2)` sites) and the RE reference (fd_build z_player_lib.c:2333).
         if ((type == PLAYER_MODELTYPE_LH_BGS) && (gSaveContext.swordHealth <= 0.0f)) {
-            dListOffset = 4;
+            dListOffset = NUM_DL_FORMS * 2;
+        }
+
+        // FD (2026-07-12): draw Fierce Deity's left hand + FD sword on the PAUSE equipment model. FD force-equips
+        // ITEM_SWORD_DEITY on B, but the pause model group is derived from the EQUIPMENT sword slot (Master/
+        // Biggoron), not the held item -- so for DEITY the L_HAND resolves to the LH_SWORD (or broken-BGS) DEITY
+        // slot, both of which are gLinkFierceDeityEmptyDL -> empty hand, no blade. Force the LH_BGS FD-sword
+        // sub-block (offset +12 = (NUM_DL_FORMS*2)*2 -> gLinkFierceDeityLeftHandHoldingSwordDL, the hand-with-blade
+        // DL), mirroring the in-game Player_OverrideLimbDrawGameplayDefault L_HAND FD branch (~line 1505).
+        if (LINK_IS_DEITY) {
+            type = PLAYER_MODELTYPE_LH_BGS;
+            dListOffset = (NUM_DL_FORMS * 2) * 2;
         }
     } else if (limbIndex == PLAYER_LIMB_R_HAND) {
         type = gPlayerModelTypes[modelGroup][PLAYER_MODELGROUPENTRY_RIGHT_HAND];
         sRightHandType = type;
+        // FD (2026-07-11) BUG 13: this is the exact leak in the report -- a human (child/adult) holding a sword
+        // with a shield equipped. `playerSwordAndShield[1]` (the shield index) must jump whole per-shield blocks
+        // of the widened sPlayerRightHandShieldDLs, whose stride is now NUM_DL_FORMS*2 (6), NOT the old 4 that the
+        // stale `ptrSize = sizeof(uint32_t)` (== 4) preserved. With *4, child(index 1)+shield*4 landed on
+        // gLinkFierceDeityRightHandDL (the deity slot of an adjacent shield block) -> FD's right hand appeared on
+        // a young/adult Link. *6 (=NUM_DL_FORMS*2) selects the correct human hand. Matches the in-game
+        // `dLists += this->currentShield * (NUM_DL_FORMS * 2)` and RE fd_build z_player_lib.c:2339.
         if (type == PLAYER_MODELTYPE_RH_SHIELD) {
-            dListOffset = playerSwordAndShield[1] * ptrSize;
+            dListOffset = playerSwordAndShield[1] * (NUM_DL_FORMS * 2);
         }
     } else if (limbIndex == PLAYER_LIMB_SHEATH) {
         type = gPlayerModelTypes[modelGroup][PLAYER_MODELGROUPENTRY_SHEATH];
+        // FD (2026-07-11) BUG 13: same widened-stride fix for the sheath+shield sub-block selection
+        // (sSheathWithSwordDLs / sSheathWithoutSwordDLs are also NUM_DL_FORMS*2 stride). RE fd_build:2344.
         if ((type == PLAYER_MODELTYPE_SHEATH_18) || (type == PLAYER_MODELTYPE_SHEATH_19)) {
-            dListOffset = playerSwordAndShield[1] * ptrSize;
+            dListOffset = playerSwordAndShield[1] * (NUM_DL_FORMS * 2);
         }
     } else if (limbIndex == PLAYER_LIMB_WAIST) {
         type = gPlayerModelTypes[modelGroup][PLAYER_MODELGROUPENTRY_WAIST];
@@ -2071,8 +2498,6 @@ s32 Player_OverrideLimbDrawPause(PlayState* play, s32 limbIndex, Gfx** dList, Ve
 
     dLists = &sPlayerDListGroups[type][gSaveContext.linkAge];
     *dList = dLists[dListOffset];
-
-    GameInteractor_Should(VB_PLAYER_OVERRIDE_LIMB_DRAW_PAUSE, true, limbIndex, dList, GET_PLAYER(play), play);
 
     return 0;
 }
@@ -2283,7 +2708,16 @@ void Player_DrawPause(PlayState* play, u8* segment, SkelAnime* skelAnime, Vec3f*
         }
     } else {
 
-        if (!LINK_IS_ADULT) {
+        // FD (2026-07-11) BUG A: the pause static-pose selector used `!LINK_IS_ADULT`, i.e. it treats every
+        // non-adult form as CHILD. Fierce Deity (linkAge==LINK_AGE_DEITY==2) is `!LINK_IS_ADULT`, so it was
+        // posed with the CHILD static pause pose (gLinkPauseChildJointTable) -- an aggressively hunched/short
+        // young-Link stance -- which reads as "the pause shows young Link". The pause BODY is still the FD
+        // skeleton (func_80091738 loads gPlayerSkelHeaders[DEITY]=&gLinkFierceDeitySkel correctly), but the
+        // child pose collapses the FD skeleton into a child-like silhouette. FD uses the ADULT-proportioned
+        // skeleton, so it must take the ADULT static pose. Gate on LINK_IS_CHILD so only true child gets the
+        // child pose; adult AND deity fall through to the adult branch. Matches vanilla OoT z_player_lib.c:1832
+        // for adult/child while adding the DEITY case (oot-master has no DEITY).
+        if (LINK_IS_CHILD) {
             if (shield == PLAYER_SHIELD_DEKU) {
                 srcTable = gLinkPauseChildDekuShieldJointTable;
             } else {

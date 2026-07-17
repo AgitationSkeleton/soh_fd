@@ -4,11 +4,10 @@
 #include "soh/cvar_prefixes.h"
 #include "soh/Notification/Notification.h"
 #include <vector>
-#include <libultraship/bridge/consolevariablebridge.h>
-#include <libultraship/libultra/types.h>
-#include <ship/Context.h>
 #include <ship/utils/StringHelper.h>
-#include <ship/window/Window.h>
+#include <libultraship/bridge.h>
+#include <libultraship/classes.h>
+#include <soh/OTRGlobals.h>
 #include <locale>
 #include <filesystem>
 
@@ -350,6 +349,14 @@ std::string AudioCollection::GetCvarLockKey(std::string sfxKey) {
 
 void AudioCollection::AddToCollection(char* otrPath, uint16_t seqNum) {
     std::string fileName = std::filesystem::path(otrPath).filename().string();
+    // FD (2026-07-13): every custom/music/FD_* resource in fd.o2r (the transform scream/face-change/mask-attach/flash
+    // cutscene audio AND the get-mask jingle) is INTERNAL Fierce Deity audio, not user-swappable game music. The
+    // generic splitter below names each by its first "_"-delimited token, so they all collapsed to duplicate "FD"
+    // entries and polluted the Audio Editor's music list. Skip the whole FD_ namespace so the editor ignores them.
+    // (These still play in-game via their own resources/FdAudio; they simply aren't listed as swappable sequences.)
+    if (fileName.rfind("FD_", 0) == 0) {
+        return;
+    }
     std::vector<std::string> splitFileName = StringHelper::Split(fileName, "_");
     std::string sequenceName = splitFileName[0];
     SeqType type = SEQ_BGM_CUSTOM;

@@ -191,20 +191,8 @@ static const ALIGN_ASSET(2) char gGiKokiriJabbernutDL[] = dgGiKokiriJabbernutDL;
 #define dgGiZoraJabbernutDL "__OTR__objects/object_jabbernut/gGiZoraJabbernutDL"
 static const ALIGN_ASSET(2) char gGiZoraJabbernutDL[] = dgGiZoraJabbernutDL;
 
-#define dgGiFishingPoleDL "__OTR__objects/object_gi_fishing_pole/gGiFishingPoleDL"
-static const ALIGN_ASSET(2) char gGiFishingPoleDL[] = dgGiFishingPoleDL;
-
-#define dgGiClimbDL "__OTR__objects/object_gi_climb/gGiClimbDL"
-static const ALIGN_ASSET(2) char gGiClimbDL[] = dgGiClimbDL;
-
-#define dgGiCrawlDL "__OTR__objects/object_gi_crawl/gGiCrawlDL"
-static const ALIGN_ASSET(2) char gGiCrawlDL[] = dgGiCrawlDL;
-
-#define dgGiOpenChestsDL "__OTR__objects/object_gi_chest/gGiOpenChestsDL"
-static const ALIGN_ASSET(2) char gGiOpenChestsDL[] = dgGiOpenChestsDL;
-
-#define dgGiGrabDL "__OTR__objects/object_gi_grab/gGiGrabDL"
-static const ALIGN_ASSET(2) char gGiGrabDL[] = dgGiGrabDL;
+#define dgFishingPoleGiDL "__OTR__objects/object_gi_fishing_pole/gFishingPoleGiDL"
+static const ALIGN_ASSET(2) char gFishingPoleGiDL[] = dgFishingPoleGiDL;
 
 #define dgMysteryItemDL "__OTR__objects/object_mystery_item/gMysteryItemDL"
 static const ALIGN_ASSET(2) char gMysteryItemDL[] = dgMysteryItemDL;
@@ -503,18 +491,6 @@ static const ALIGN_ASSET(2) char gFileSelLanguageGERTex[] = dgFileSelLanguageGER
 #define dgRocsFeatherTex "__OTR__textures/icon_item_static/gRocsFeatherTex"
 static const ALIGN_ASSET(2) char gRocsFeatherTex[] = dgRocsFeatherTex;
 
-#define dgCrawlTex "__OTR__textures/icon_item_static/gCrawlTex"
-static const ALIGN_ASSET(2) char gCrawlTex[] = dgCrawlTex;
-
-#define dgClimbTex "__OTR__textures/icon_item_static/gClimbTex"
-static const ALIGN_ASSET(2) char gClimbTex[] = dgClimbTex;
-
-#define dgOpenChestsTex "__OTR__textures/icon_item_static/gOpenChestsTex"
-static const ALIGN_ASSET(2) char gOpenChestsTex[] = dgOpenChestsTex;
-
-#define dgGrabTex "__OTR__textures/icon_item_static/gGrabTex"
-static const ALIGN_ASSET(2) char gGrabTex[] = dgGrabTex;
-
 #define dgRocsFeatherItemNameENGTex "__OTR__textures/item_name_static/gRocsFeatherItemNameENGTex"
 static const ALIGN_ASSET(2) char gRocsFeatherItemNameENGTex[] = dgRocsFeatherItemNameENGTex;
 
@@ -523,6 +499,16 @@ static const ALIGN_ASSET(2) char gRocsFeatherItemNameGERTex[] = dgRocsFeatherIte
 
 #define dgRocsFeatherItemNameFRATex "__OTR__textures/item_name_static/gRocsFeatherItemNameFRATex"
 static const ALIGN_ASSET(2) char gRocsFeatherItemNameFRATex[] = dgRocsFeatherItemNameFRATex;
+
+// Fierce Deity (aegiker RE->SoH port 2026-07-11). Icons/name banner shipped by fd.o2r (from mm.o2r).
+#define dgFierceDeityMaskTex "__OTR__textures/icon_item_static/gFierceDeityMaskTex"
+static const ALIGN_ASSET(2) char gFierceDeityMaskTex[] = dgFierceDeityMaskTex;
+
+#define dgFierceDeitySwordTex "__OTR__textures/icon_item_static/gFierceDeitySwordTex"
+static const ALIGN_ASSET(2) char gFierceDeitySwordTex[] = dgFierceDeitySwordTex;
+
+#define dgFierceDeityMaskItemNameENGTex "__OTR__textures/item_name_static/gFierceDeityMaskItemNameENGTex"
+static const ALIGN_ASSET(2) char gFierceDeityMaskItemNameENGTex[] = dgFierceDeityMaskItemNameENGTex;
 
 #define dgEmptyTexture "__OTR__textures/virtual/gEmptyTexture"
 static const ALIGN_ASSET(2) char gEmptyTexture[] = dgEmptyTexture;

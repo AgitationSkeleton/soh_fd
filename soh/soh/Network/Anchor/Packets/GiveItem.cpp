@@ -1,5 +1,6 @@
 #include "soh/Network/Anchor/Anchor.h"
 #include <nlohmann/json.hpp>
+#include <libultraship/libultraship.h>
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Notification/Notification.h"
 #include "soh/Enhancements/randomizer/randomizer.h"
@@ -52,6 +53,22 @@ void Anchor::HandlePacket_GiveItem(nlohmann::json payload) {
     AnchorClient& client = clients[clientId];
     u16 modId = payload.at("modId").get<u16>();
     u16 getItemId = payload.at("getItemId").get<u16>();
+
+    // FD (2026-07-14): the Fierce Deity mask is a custom item id (ITEM_MASK_DEITY, 0x9F) with no item-table /
+    // rando entry, so the generic RetrieveItemEntry path below can't reconstruct it (it resolves to a bogus/Goron
+    // entry). Grant it directly -- Item_Give(ITEM_MASK_DEITY) routes to the hasFierceDeityMask flag + kaleido
+    // cycle path (z_parameter.c), matching a legitimate silent grant. IsSaveLoaded() above guarantees gPlayState.
+    if (modId == MOD_NONE && getItemId == ITEM_MASK_DEITY) {
+        if (!gSaveContext.ship.hasFierceDeityMask) {
+            Item_Give(gPlayState, ITEM_MASK_DEITY);
+            Notification::Emit({
+                .prefix = client.name,
+                .message = "found",
+                .suffix = "Fierce Deity's Mask",
+            });
+        }
+        return;
+    }
 
     GetItemEntry getItemEntry;
     if (modId == MOD_NONE) {

@@ -8,7 +8,6 @@
 #include "soh/ResourceManagerHelpers.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
-#include "soh/Enhancements/savestate_serialize.h"
 
 typedef enum {
     /* 0 */ LENS_FLARE_CIRCLE0,
@@ -58,10 +57,7 @@ u8 D_8011FB38 = 0;
 
 u8 gSkyboxBlendingEnabled = false;
 
-u16 gTimeSpeed = 0;
-
-#define ENVIRONMENT_SHIP_SAVESTATE_FIELDS(F) F(gTimeSpeed)
-SHIP_SAVESTATE_DEFINE(Environment, ENVIRONMENT_SHIP_SAVESTATE_FIELDS)
+u16 gTimeIncrement = 0;
 
 u16 D_8011FB44 = 0xFFFC;
 
@@ -325,7 +321,7 @@ void Environment_Init(PlayState* play2, EnvironmentContext* envCtx, s32 unused) 
     envCtx->blendIndoorLights = false;
     envCtx->unk_BF = 0xFF;
     envCtx->unk_D6 = 0xFFFF;
-    R_ENV_TIME_INCREMENT = gTimeSpeed = envCtx->timeIncrement = 0;
+    R_ENV_TIME_INCREMENT = gTimeIncrement = envCtx->timeIncrement = 0;
     R_ENV_DISABLE_DBG = true;
 
     if (CREG(3) != 0) {
@@ -340,7 +336,7 @@ void Environment_Init(PlayState* play2, EnvironmentContext* envCtx, s32 unused) 
     play->envCtx.unk_F2[0] = 0;
 
     if (gSaveContext.retainWeatherMode != 0) {
-        if (((void)0, gSaveContext.sceneLayer) < 4) {
+        if (((void)0, gSaveContext.sceneSetupIndex) < 4) {
             switch (gWeatherMode) {
                 case 1:
                     envCtx->unk_17 = 1;
@@ -842,7 +838,7 @@ void Environment_PrintDebugInfo(PlayState* play, Gfx** gfx) {
     GfxPrint_SetColor(&printer, 255, 255, 255, 64);
     GfxPrint_Printf(&printer, "%02d", (u8)(24 * 60 / (f32)0x10000 * ((void)0, gSaveContext.dayTime) / 60.0f));
 
-    if ((gSaveContext.dayTime & 0x1F) >= 0x10 || gTimeSpeed >= 6) {
+    if ((gSaveContext.dayTime & 0x1F) >= 0x10 || gTimeIncrement >= 6) {
         GfxPrint_Printf(&printer, "%s", ":");
     } else {
         GfxPrint_Printf(&printer, "%s", " ");
@@ -857,7 +853,7 @@ void Environment_PrintDebugInfo(PlayState* play, Gfx** gfx) {
     GfxPrint_SetColor(&printer, 255, 255, 255, 64);
     GfxPrint_Printf(&printer, "%02d", (u8)(24 * 60 / (f32)0x10000 * ((void)0, gSaveContext.skyboxTime) / 60.0f));
 
-    if ((((void)0, gSaveContext.skyboxTime) & 0x1F) >= 0x10 || gTimeSpeed >= 6) {
+    if ((((void)0, gSaveContext.skyboxTime) & 0x1F) >= 0x10 || gTimeIncrement >= 6) {
         GfxPrint_Printf(&printer, "%s", ":");
     } else {
         GfxPrint_Printf(&printer, "%s", " ");
@@ -930,19 +926,19 @@ void Environment_Update(PlayState* play, EnvironmentContext* envCtx, LightContex
                 if ((envCtx->unk_1A == 0) && !FrameAdvance_IsEnabled(play) &&
                     (play->transitionMode == TRANS_MODE_OFF || ((void)0, gSaveContext.gameMode) != GAMEMODE_NORMAL)) {
 
-                    if (IS_DAY || gTimeSpeed >= 0x190) {
-                        gSaveContext.dayTime += gTimeSpeed;
+                    if (IS_DAY || gTimeIncrement >= 0x190) {
+                        gSaveContext.dayTime += gTimeIncrement;
                     } else {
-                        gSaveContext.dayTime += gTimeSpeed * 2; // time moves twice as fast at night
+                        gSaveContext.dayTime += gTimeIncrement * 2; // time moves twice as fast at night
                     }
                 }
             }
         }
 
-        //! @bug `gTimeSpeed` is unsigned, it can't be negative
-        if (((((void)0, gSaveContext.sceneLayer) >= 5 || gTimeSpeed != 0) &&
+        //! @bug `gTimeIncrement` is unsigned, it can't be negative
+        if (((((void)0, gSaveContext.sceneSetupIndex) >= 5 || gTimeIncrement != 0) &&
              ((void)0, gSaveContext.dayTime) > gSaveContext.skyboxTime) ||
-            (((void)0, gSaveContext.dayTime) < 0xAAB || gTimeSpeed < 0)) {
+            (((void)0, gSaveContext.dayTime) < 0xAAB || gTimeIncrement < 0)) {
             gSaveContext.skyboxTime = ((void)0, gSaveContext.dayTime);
         }
 
@@ -1325,7 +1321,8 @@ void Environment_DrawSunAndMoon(PlayState* play) {
         play->envCtx.sunPos.z = +(Math_CosS(((void)0, gSaveContext.dayTime) - 0x8000) * 20.0f) * 25.0f;
     }
 
-    if (gSaveContext.entranceIndex != ENTR_HYRULE_FIELD_PAST_BRIDGE_SPAWN || ((void)0, gSaveContext.sceneLayer) != 5) {
+    if (gSaveContext.entranceIndex != ENTR_HYRULE_FIELD_PAST_BRIDGE_SPAWN ||
+        ((void)0, gSaveContext.sceneSetupIndex) != 5) {
         Matrix_Translate(play->view.eye.x + play->envCtx.sunPos.x, play->view.eye.y + play->envCtx.sunPos.y,
                          play->view.eye.z + play->envCtx.sunPos.z, MTXMODE_NEW);
 
@@ -2014,11 +2011,11 @@ void Environment_PlaySceneSequence(PlayState* play) {
         osSyncPrintf("\n\n\nBGM設定game_play->sound_info.BGM=[%d] old_bgm=[%d]\n\n", play->sequenceCtx.seqId,
                      ((void)0, gSaveContext.seqId));
         if (((void)0, gSaveContext.seqId) != play->sequenceCtx.seqId) {
-            Audio_PlaySceneSequence(play->sequenceCtx.seqId);
+            func_800F5550(play->sequenceCtx.seqId);
         }
     } else if (((void)0, gSaveContext.dayTime) > 0x4AAA && ((void)0, gSaveContext.dayTime) < 0xB71D) {
         if (((void)0, gSaveContext.seqId) != play->sequenceCtx.seqId) {
-            Audio_PlaySceneSequence(play->sequenceCtx.seqId);
+            func_800F5550(play->sequenceCtx.seqId);
         }
 
         play->envCtx.unk_E0 = 1;
@@ -2053,7 +2050,7 @@ void func_80075B44(PlayState* play) {
                                              CHANNEL_IO_PORT_1, 0);
             if (play->envCtx.unk_EE[0] == 0 && play->envCtx.unk_F2[0] == 0) {
                 osSyncPrintf("\n\n\nNa_StartMorinigBgm\n\n");
-                Audio_PlayMorningSceneSequence(play->sequenceCtx.seqId);
+                func_800F5510(play->sequenceCtx.seqId);
             }
             play->envCtx.unk_E0++;
             break;
@@ -2169,7 +2166,7 @@ void Environment_FadeInGameOverLights(PlayState* play) {
         sGameOverLightsIntensity += 2;
     }
 
-    if (Play_CamIsNotFixed(play)) {
+    if (func_800C0CB8(play)) {
         for (i = 0; i < 3; i++) {
             if (play->envCtx.adjAmbientColor[i] > -255) {
                 play->envCtx.adjAmbientColor[i] -= 12;
@@ -2216,7 +2213,7 @@ void Environment_FadeOutGameOverLights(PlayState* play) {
                                   sGameOverLightsIntensity, sGameOverLightsIntensity, sGameOverLightsIntensity, 255);
     }
 
-    if (Play_CamIsNotFixed(play)) {
+    if (func_800C0CB8(play)) {
         for (i = 0; i < 3; i++) {
             Math_SmoothStepToS(&play->envCtx.adjAmbientColor[i], 0, 5, 12, 1);
             Math_SmoothStepToS(&play->envCtx.adjLight1Color[i], 0, 5, 12, 1);
@@ -2444,7 +2441,7 @@ void Environment_AdjustLights(PlayState* play, f32 arg1, f32 arg2, f32 arg3, f32
     f32 temp;
     s32 i;
 
-    if (play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_5 && Play_CamIsNotFixed(play)) {
+    if (play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_5 && func_800C0CB8(play)) {
         arg1 = CLAMP_MIN(arg1, 0.0f);
         arg1 = CLAMP_MAX(arg1, 1.0f);
 

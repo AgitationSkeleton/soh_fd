@@ -53,12 +53,23 @@
 
 #define GET_ACTIVE_CAM(play) ((play)->cameraPtrs[(play)->activeCamera]) // Upstream TODO: Camera
 
+// Fierce Deity (aegiker RE->SoH port 2026-07-11). FD-only: 3 humanoid forms (adult/child/deity).
+// NUM_DL_FORMS = stride of the baked hand/sheath/waist LOD DL tables (humanoid forms only).
+// NUM_FORMS = stride of genuine per-form arrays (eyes/mouth/leg-IK/bottle). Both 3 for FD-only
+// (fd_build used 6 for its 6 forms).
+#define NUM_FORMS 3
+#define NUM_DL_FORMS 3
+
 #define LINK_IS_ADULT (gSaveContext.linkAge == LINK_AGE_ADULT)
 #define LINK_IS_CHILD (gSaveContext.linkAge == LINK_AGE_CHILD)
+#define LINK_IS_DEITY (gSaveContext.linkAge == LINK_AGE_DEITY)
+#define LINK_IS_HUMAN (LINK_IS_ADULT || LINK_IS_CHILD)
 
 #define YEARS_CHILD 5
 #define YEARS_ADULT 17
-#define LINK_AGE_IN_YEARS (!LINK_IS_ADULT ? YEARS_CHILD : YEARS_ADULT)
+#define YEARS_DEITY 80
+// DEITY-tolerant: FD must not be misclassified as child by the !LINK_IS_ADULT test.
+#define LINK_AGE_IN_YEARS (!LINK_IS_DEITY ? (!LINK_IS_ADULT ? YEARS_CHILD : YEARS_ADULT) : YEARS_DEITY)
 
 #define CLOCK_TIME(hr, min) ((s32)(((hr) * 60 + (min)) * (f32)0x10000 / (24 * 60) + 0.5f))
 
@@ -319,6 +330,16 @@ extern GraphicsContext* __gfxCtx;
 #define NUM_TRIALS 6
 #define NUM_SHOP_ITEMS 64
 #define NUM_SCRUBS 46
+#define FOREST_TEMPLE_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_FOREST_TEMPLE) ? 6 : 5)
+#define FIRE_TEMPLE_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_FIRE_TEMPLE) ? 5 : 8)
+#define WATER_TEMPLE_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_WATER_TEMPLE) ? 2 : 6)
+#define SPIRIT_TEMPLE_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_SPIRIT_TEMPLE) ? 7 : 5)
+#define SHADOW_TEMPLE_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_SHADOW_TEMPLE) ? 6 : 5)
+#define BOTTOM_OF_THE_WELL_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_BOTTOM_OF_THE_WELL) ? 2 : 3)
+#define GERUDO_TRAINING_GROUND_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_GERUDO_TRAINING_GROUND) ? 3 : 9)
+#define GERUDO_FORTRESS_SMALL_KEY_MAX 4
+#define GANONS_CASTLE_SMALL_KEY_MAX (ResourceMgr_IsSceneMasterQuest(SCENE_INSIDE_GANONS_CASTLE) ? 3 : 2)
+#define TREASURE_GAME_SMALL_KEY_MAX 6
 
 #ifdef __cplusplus
 #define DUNGEON_ITEMS_CAN_BE_OUTSIDE_DUNGEON(rsk) \

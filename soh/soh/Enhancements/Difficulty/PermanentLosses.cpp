@@ -1,6 +1,3 @@
-#include <ship/Context.h>
-#include <ship/window/Window.h>
-
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
 #include "soh/Enhancements/randomizer/randomizer.h"
 #include "soh/OTRGlobals.h"
@@ -9,6 +6,7 @@
 
 extern "C" {
 #include "functions.h"
+#include "macros.h"
 #include "variables.h"
 #include "z64save.h"
 extern SaveContext gSaveContext;

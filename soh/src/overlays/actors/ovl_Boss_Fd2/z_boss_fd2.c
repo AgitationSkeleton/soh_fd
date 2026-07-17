@@ -253,7 +253,7 @@ void BossFd2_Emerge(BossFd2* this, PlayState* play) {
                 bossFd->faceExposed = 0;
                 bossFd->holePosition.x = this->actor.world.pos.x;
                 bossFd->holePosition.z = this->actor.world.pos.z;
-                Actor_RequestQuakeWithSpeed(play, 1, 0x32, 0x5000);
+                func_80033E1C(play, 1, 0x32, 0x5000);
                 this->work[FD2_ACTION_STATE] = 1;
                 this->work[FD2_HOLE_COUNTER]++;
                 this->actor.world.pos.y = -200.0f;
@@ -304,7 +304,7 @@ void BossFd2_Emerge(BossFd2* this, PlayState* play) {
         case 2:
             Math_ApproachS(&this->actor.shape.rot.y, this->actor.yawTowardsPlayer, 3, 0x7D0);
             if ((this->timers[0] == 1) && (this->actor.xzDistToPlayer < 120.0f)) {
-                Actor_SetPlayerKnockbackLarge(play, &this->actor, 3.0f, this->actor.yawTowardsPlayer, 2.0f, 0x20);
+                func_8002F6D4(play, &this->actor, 3.0f, this->actor.yawTowardsPlayer, 2.0f, 0x20);
                 Audio_PlayActorSound2(&player->actor, NA_SE_PL_BODY_HIT);
             }
             if (Animation_OnFrame(&this->skelAnime, this->fwork[FD2_END_FRAME])) {
@@ -651,7 +651,7 @@ void BossFd2_Death(BossFd2* this, PlayState* play) {
     Vec3f sp70;
     Vec3f sp64;
     BossFd* bossFd = (BossFd*)this->actor.parent;
-    Camera* mainCam = Play_GetCamera(play, CAM_ID_MAIN);
+    Camera* mainCam = Play_GetCamera(play, MAIN_CAM);
     f32 pad3;
     f32 pad2;
     f32 pad1;
@@ -665,7 +665,7 @@ void BossFd2_Death(BossFd2* this, PlayState* play) {
             func_80064520(play, &play->csCtx);
             Player_SetCsActionWithHaltedActors(play, &this->actor, 1);
             this->deathCamera = Play_CreateSubCamera(play);
-            Play_ChangeCameraStatus(play, CAM_ID_MAIN, CAM_STAT_WAIT);
+            Play_ChangeCameraStatus(play, MAIN_CAM, CAM_STAT_WAIT);
             Play_ChangeCameraStatus(play, this->deathCamera, CAM_STAT_ACTIVE);
             this->camData.eye = mainCam->eye;
             this->camData.at = mainCam->at;
@@ -838,12 +838,32 @@ void BossFd2_CollisionCheck(BossFd2* this, PlayState* play) {
         this->collider.base.colType = COLTYPE_HIT3;
     }
 
-    if (this->collider.elements[0].info.bumperFlags & BUMP_HIT) {
+    // FD (2026-07-12) BOSS PARITY (aegiker): the FD great sword beam knocks Volvagia's armored head down like the
+    // Megaton Hammer. The hack's composite beam carries DMG_HAMMER; here the head bumper rejects sword-tier hits, so
+    // detect the beam by PROXIMITY to the head (actor.focus.pos, the head/debris origin) instead of via BUMP_HIT.
+    // RE Boss_Fd2 z_boss_fd2.c:835 (the head-expose is gated on & DMG_HAMMER, which the composite satisfies).
+    s32 fdBeamHeadHit = false;
+    if (!bossFd->faceExposed) {
+        Actor* beam = play->actorCtx.actorLists[ACTORCAT_ITEMACTION].head;
+
+        while (beam != NULL) {
+            if (EnMThunder_IsFdSwordBeam(beam) &&
+                (fabsf(beam->world.pos.x - this->actor.focus.pos.x) < 45.0f) &&
+                (fabsf(beam->world.pos.y - this->actor.focus.pos.y) < 45.0f) &&
+                (fabsf(beam->world.pos.z - this->actor.focus.pos.z) < 45.0f)) {
+                fdBeamHeadHit = true;
+                break;
+            }
+            beam = beam->next;
+        }
+    }
+
+    if ((this->collider.elements[0].info.bumperFlags & BUMP_HIT) || fdBeamHeadHit) {
         this->collider.elements[0].info.bumperFlags &= ~BUMP_HIT;
 
         hurtbox = this->collider.elements[0].info.acHitInfo;
         if (!bossFd->faceExposed) {
-            if (hurtbox->toucher.dmgFlags & 0x40000040) {
+            if (fdBeamHeadHit || (hurtbox->toucher.dmgFlags & 0x40000040)) {
                 bossFd->actor.colChkInfo.health -= 2;
                 if ((s8)bossFd->actor.colChkInfo.health <= 2) {
                     bossFd->actor.colChkInfo.health = 1;

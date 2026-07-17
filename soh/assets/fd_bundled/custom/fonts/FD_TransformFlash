@@ -1,0 +1,12 @@
+<SoundFont Version="0" Num="0" Medium="Ram" CachePolicy="Persistent" Data1="0" Data2="0" Data3="0">
+    <Instruments>
+        <Instrument IsValid="1" Loaded="0" NormalRangeLo="0" NormalRangeHi="127" ReleaseRate="251">
+            <Envelopes>
+                <Envelope Delay="1" Arg="32700"/>
+                <Envelope Delay="32700" Arg="32700"/>
+                <Envelope Delay="-1" Arg="0"/>
+            </Envelopes>
+            <NormalNotesSound Tuning="1.0" SampleRef="custom/samples/fd/Flash_Transform"/>
+        </Instrument>
+    </Instruments>
+</SoundFont>

@@ -231,7 +231,7 @@ s32 EnFd_SpawnCore(EnFd* this, PlayState* play) {
     }
 
     if (CHECK_FLAG_ALL(this->actor.flags, ACTOR_FLAG_HOOKSHOT_ATTACHED)) {
-        Actor_SwapHookshotAttachment(play, &this->actor, this->actor.child);
+        func_8002DE04(play, &this->actor, this->actor.child);
     }
 
     this->coreActive = true;
@@ -312,8 +312,7 @@ s32 EnFd_ColliderCheck(EnFd* this, PlayState* play) {
         }
         this->attackTimer = 30;
         Audio_PlayActorSound2(&player->actor, NA_SE_PL_BODY_HIT);
-        Actor_SetPlayerKnockbackLargeNoDamage(play, &this->actor, this->actor.speedXZ + 2.0f,
-                                              this->actor.yawTowardsPlayer, 6.0f);
+        func_8002F71C(play, &this->actor, this->actor.speedXZ + 2.0f, this->actor.yawTowardsPlayer, 6.0f);
     }
     return false;
 }
@@ -509,7 +508,7 @@ void EnFd_SpinAndGrow(EnFd* this, PlayState* play) {
 }
 
 void EnFd_JumpToGround(EnFd* this, PlayState* play) {
-    if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) && !(this->actor.velocity.y > 0.0f)) {
+    if ((this->actor.bgCheckFlags & 1) && !(this->actor.velocity.y > 0.0f)) {
         this->actor.velocity.y = 0.0f;
         this->actor.speedXZ = 0.0f;
         this->actor.world.rot.y = this->actor.shape.rot.y;
@@ -538,9 +537,9 @@ void EnFd_SpinAndSpawnFire(EnFd* this, PlayState* play) {
     f32 rotSpeed;
 
     if ((this->spinTimer < 31) && (this->invincibilityTimer == 0)) {
-        Actor_PlaySfx_Flagged(&this->actor, NA_SE_EN_FLAME_FIRE_ATTACK - SFX_FLAG);
+        func_8002F974(&this->actor, NA_SE_EN_FLAME_FIRE_ATTACK - SFX_FLAG);
     } else {
-        Actor_PlaySfx_Flagged(&this->actor, NA_SE_EN_FLAME_ROLL - SFX_FLAG);
+        func_8002F974(&this->actor, NA_SE_EN_FLAME_ROLL - SFX_FLAG);
     }
 
     if (DECR(this->spinTimer) != 0) {
@@ -629,7 +628,7 @@ void EnFd_Run(EnFd* this, PlayState* play) {
     EnFd_GetPosAdjAroundCircle(&adjPos, this, this->runRadius, this->runDir);
     Math_SmoothStepToS(&this->actor.shape.rot.y, Math_FAtan2F(adjPos.x, adjPos.z) * (0x8000 / M_PI), 4, 0xFA0, 1);
     this->actor.world.rot = this->actor.shape.rot;
-    Actor_PlaySfx_Flagged(&this->actor, NA_SE_EN_FLAME_RUN - SFX_FLAG);
+    func_8002F974(&this->actor, NA_SE_EN_FLAME_RUN - SFX_FLAG);
     if (this->skelAnime.curFrame == 6.0f || this->skelAnime.curFrame == 13.0f || this->skelAnime.curFrame == 28.0f) {
         Audio_PlayActorSound2(&this->actor, NA_SE_EN_FLAME_KICK);
     }

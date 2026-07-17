@@ -11,6 +11,18 @@ void EnMThunder_Draw(Actor* thisx, PlayState* play);
 void EnMThunder_AdjustEnvLights(PlayState* play, f32 intensity);
 void EnMThunder_ChargingSpinAttack(EnMThunder* this, PlayState* play);
 void EnMThunder_SpinAttacking(EnMThunder* this, PlayState* play);
+void EnMThunder_SwordBeamAttack(EnMThunder* this, PlayState* play); // FD (2026-07-12): FD sword-beam projectile
+
+// FD (2026-07-12) ★#9 0-DAMAGE FIX: the RE composite value 0xC0022A68 (MM's DMG_SWORDBEAM, highest bit = MM's
+// DMG_SWORD_BEAM at bit 31) is WRONG for SoH. SoH resolves the damage-table index from the HIGHEST set bit of
+// toucher.dmgFlags (CollisionCheck_ApplyDamage, z_collision_check.c:3017-3023 shifts until flags==1). In SoH bit 31
+// = DMG_UNKNOWN_2, an UNUSED type every enemy's DamageTable maps to 0 -> the beam always resolved to 0 damage even
+// though it hit (shared a lower bit). MM had a real DMG_SWORD_BEAM at bit 31, so it worked there. Fix: use a single
+// valid SoH damage type as the highest bit. DMG_SLASH_MASTER (1 << 0x09 = 0x200) is the master-sword slash, the most
+// universal enemy vulnerability and exactly what the FD blade itself deals -- so the beam now does normal sword
+// damage. (SoH's sword-beam has no dedicated damage type; the spin works precisely because its flag is one clean
+// bit, sSpinAttackDmgFlags = DMG_SPIN_MASTER, below.)
+#define DMG_SWORDBEAM 0x00000200 // DMG_SLASH_MASTER (1 << 0x09)
 
 const ActorInit En_M_Thunder_InitVars = {
     ACTOR_EN_M_THUNDER,
@@ -84,24 +96,52 @@ void EnMThunder_Init(Actor* thisx, PlayState* play2) {
     this->isUsingMagic = 0;
 
     if (player->stateFlags2 & PLAYER_STATE2_SPIN_ATTACKING) {
-        if (!gSaveContext.isMagicAcquired || (gSaveContext.magicState != MAGIC_STATE_IDLE) ||
-            (((this->actor.params & 0xFF00) >> 8) &&
-             !(Magic_RequestChange(play, (this->actor.params & 0xFF00) >> 8, MAGIC_CONSUME_NOW)))) {
-            Audio_PlaySoundGeneral(NA_SE_IT_ROLLING_CUT, &player->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
-                                   &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-            Audio_PlaySoundGeneral(NA_SE_IT_SWORD_SWING_HARD, &player->actor.projectedPos, 4,
-                                   &gSfxDefaultFreqAndVolScale, &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
-            Actor_Kill(&this->actor);
-            return;
+        // FD (2026-07-12): Fierce Deity's swing sword-beam already paid its magic on the player side
+        // (MAGIC_CONSUME_DEITY_BEAM in Player_ActionHandler_7), so magicState is no longer IDLE. The vanilla
+        // OoT magic-kill check below would then Actor_Kill the beam -> only the swing SFX plays, no projectile
+        // (the exact "beams just slash" bug). The RE skips this check for FD (fd_build z_en_m_thunder.c:90).
+        if (!LINK_IS_DEITY) {
+            if (!gSaveContext.isMagicAcquired || (gSaveContext.magicState != MAGIC_STATE_IDLE) ||
+                (((this->actor.params & 0xFF00) >> 8) &&
+                 !(Magic_RequestChange(play, (this->actor.params & 0xFF00) >> 8, MAGIC_CONSUME_NOW)))) {
+                Audio_PlaySoundGeneral(NA_SE_IT_ROLLING_CUT, &player->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
+                                       &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
+                Audio_PlaySoundGeneral(NA_SE_IT_SWORD_SWING_HARD, &player->actor.projectedPos, 4,
+                                       &gSfxDefaultFreqAndVolScale, &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
+                Actor_Kill(&this->actor);
+                return;
+            }
         }
 
         player->stateFlags2 &= ~PLAYER_STATE2_SPIN_ATTACKING;
         this->isUsingMagic = 1;
-        this->collider.info.toucher.dmgFlags = sSpinAttackDmgFlags[this->swordType];
-        this->attackStrength = 1;
-        this->targetScale = ((this->swordType == 1) ? 2 : 4);
-        EnMThunder_SetupAction(this, EnMThunder_SpinAttacking);
-        this->followPlayerTimer = 8;
+
+        // FD (2026-07-12): a real spin swing (meleeWeaponAnimation >= PLAYER_MWA_SPIN_ATTACK_1H) sets up the
+        // vanilla spin; a regular slash (only reachable as FD, whose swings all fire beams) sets up the flying
+        // sword-beam projectile instead (RE z_en_m_thunder.c:106-121).
+        if (player->meleeWeaponAnimation >= PLAYER_MWA_SPIN_ATTACK_1H) {
+            this->collider.info.toucher.dmgFlags = sSpinAttackDmgFlags[this->swordType];
+            this->attackStrength = 1;
+            this->targetScale = ((this->swordType == 1) ? 2 : 4);
+            EnMThunder_SetupAction(this, EnMThunder_SpinAttacking);
+            this->followPlayerTimer = 8;
+        } else {
+            this->subtype += ENMTHUNDER_SUBTYPE_SWORDBEAM_GREAT;
+            EnMThunder_SetupAction(this, EnMThunder_SwordBeamAttack);
+            this->followPlayerTimer = 1;
+            this->targetScale = 12;
+            // FD (2026-07-12) "FD Beams Light Fire" cheat. The aegiker hack's FD beam carries a COMPOSITE dmgFlags
+            // that includes DMG_FIRE, so its beams light torches / burn webs -- but vanilla MM's En_M_Thunder
+            // carries ONLY DMG_SWORD_BEAM and lights NOTHING (confirmed vs mm-main Obj_Syokudai). So by default we
+            // use the single clean DMG_SLASH_MASTER (MM parity: no lighting); the cheat OR-s in the fire-arrow bit
+            // (0x800) so the torch/web actors' existing fire checks fire. Because SoH resolves damage from the
+            // HIGHEST set bit, the cheat also makes the beam do fire-arrow-tier generic damage instead of sword-tier
+            // -- a documented, opt-in side effect that mirrors the aegiker composite's fire nature.
+            this->collider.info.toucher.dmgFlags =
+                CVarGetInteger(CVAR_CHEAT("TransformationMasks.FdBeamsLightFire"), 0) ? (DMG_SWORDBEAM | 0x800)
+                                                                                      : DMG_SWORDBEAM;
+            this->collider.info.toucher.damage = 3;
+        }
         Audio_PlaySoundGeneral(NA_SE_IT_ROLLING_CUT_LV1, &player->actor.projectedPos, 4, &gSfxDefaultFreqAndVolScale,
                                &gSfxDefaultFreqAndVolScale, &gSfxDefaultReverb);
         this->spinAttackTimer = 1.0f;
@@ -109,6 +149,17 @@ void EnMThunder_Init(Actor* thisx, PlayState* play2) {
         EnMThunder_SetupAction(this, EnMThunder_ChargingSpinAttack);
     }
     this->actor.child = NULL;
+}
+
+// FD (2026-07-12) BOSS PARITY helper: is this actor a Fierce Deity flying sword beam (great or regular subtype)?
+// The aegiker hack tags its beam with a COMPOSITE dmgFlags whose DMG_SWORD_BEAM bit the MM/RE bosses test to grant
+// special reactions (Gohma 180f stun, Dodongo swallow, Barinade/Phantom-Ganon/Twinrova hits, Skulltula one-shot).
+// SoH resolves damage from the single highest dmgFlags bit, so our beam can't carry that composite -- instead each
+// ported boss detects the beam ACTOR via this predicate (equivalent to `& DMG_SWORD_BEAM`). Excludes the melee
+// spin/charge subtypes (0/1) so only the ranged projectile qualifies, exactly like the RE's great-beam gate.
+s32 EnMThunder_IsFdSwordBeam(Actor* actor) {
+    return (actor != NULL) && (actor->id == ACTOR_EN_M_THUNDER) && (actor->update != NULL) &&
+           (((EnMThunder*)actor)->subtype >= ENMTHUNDER_SUBTYPE_SWORDBEAM_GREAT);
 }
 
 void EnMThunder_Destroy(Actor* thisx, PlayState* play) {
@@ -173,7 +224,7 @@ void EnMThunder_ChargingSpinAttack(EnMThunder* this, PlayState* play) {
     }
 
     if (player->unk_858 >= 0.1f) {
-        Rumble_Request(0.0f, (s32)(player->unk_858 * 150.0f) & 0xFF, 2, (s32)(player->unk_858 * 150.0f) & 0xFF);
+        func_800AA000(0.0f, (s32)(player->unk_858 * 150.0f) & 0xFF, 2, (s32)(player->unk_858 * 150.0f) & 0xFF);
     }
 
     if (player->stateFlags2 & PLAYER_STATE2_SPIN_ATTACKING) {
@@ -301,13 +352,60 @@ void EnMThunder_SpinAttacking(EnMThunder* this, PlayState* play) {
     }
 }
 
+// FD (2026-07-12): the Fierce Deity flying sword-beam (RE EnMThunder_SwordBeam_Attack, fd_build
+// z_en_m_thunder.c:336). Advances the projectile forward along its facing (and pitch), scales it up, keeps its
+// AT collider on the tip each frame, and fades out over ~20 frames (spinAttackTimer 1.0 -> 0 at step 0.05).
+void EnMThunder_SwordBeamAttack(EnMThunder* this, PlayState* play) {
+    f32 forwardStep;
+
+    this->actor.shape.rot.x = -this->actor.world.rot.x;
+
+    if (this->spinAttackTimer > (9.0f / 10.0f)) {
+        this->spinAttackAlpha = 1.0f;
+    } else {
+        this->spinAttackAlpha = this->spinAttackTimer * (10.0f / 9.0f);
+    }
+
+    if (Math_StepToF(&this->spinAttackTimer, 0.0f, 0.05f)) {
+        Actor_Kill(&this->actor);
+    } else {
+        forwardStep = -80.0f * Math_CosS(this->actor.world.rot.x);
+
+        this->actor.world.pos.x += forwardStep * Math_SinS(this->actor.shape.rot.y);
+        this->actor.world.pos.z += forwardStep * Math_CosS(this->actor.shape.rot.y);
+        this->actor.world.pos.y += -80.0f * Math_SinS(this->actor.world.rot.x);
+
+        Math_SmoothStepToF(&this->actor.scale.x, this->targetScale, 0.6f, 2.0f, 0.0f);
+        Actor_SetScale(&this->actor, this->actor.scale.x);
+
+        this->collider.dim.radius = this->actor.scale.x * 5.0f;
+        this->collider.dim.pos.x =
+            (Math_SinS(this->actor.shape.rot.y) * -5.0f * this->actor.scale.x) + this->actor.world.pos.x;
+        this->collider.dim.pos.y = this->actor.world.pos.y;
+        this->collider.dim.pos.z =
+            (Math_CosS(this->actor.shape.rot.y) * -5.0f * this->actor.scale.z) + this->actor.world.pos.z;
+
+        CollisionCheck_SetAT(play, &play->colChkCtx, &this->collider.base);
+    }
+
+    if (this->followPlayerTimer > 0) {
+        this->followPlayerTimer--;
+    }
+
+    EnMThunder_UpdateSpinAttack(this, play);
+}
+
 void EnMThunder_Update(Actor* thisx, PlayState* play) {
     EnMThunder* this = (EnMThunder*)thisx;
     f32 blueRadius;
     s32 redGreen;
 
     this->actionFunc(this, play);
-    EnMThunder_AdjustEnvLights(play, this->dimmingIntensity);
+    // FD (2026-07-12) #8: the environment-dimming is the vanilla GREAT-SPIN dramatic effect. For the Fierce Deity
+    // sword BEAM projectile (subtype >= SWORDBEAM_GREAT) it reads as an unwanted world-darken on every swing, so skip
+    // the dim for the beam -- only the real spin/charge dims the scene.
+    EnMThunder_AdjustEnvLights(
+        play, (this->subtype >= ENMTHUNDER_SUBTYPE_SWORDBEAM_GREAT) ? 0.0f : this->dimmingIntensity);
     blueRadius = this->spinAttackTimer;
     redGreen = (u32)(blueRadius * 255.0f) & 0xFF;
     Lights_PointNoGlowSetInfo(&this->lightInfo, this->actor.world.pos.x, this->actor.world.pos.y,
@@ -327,6 +425,25 @@ void EnMThunder_Draw(Actor* thisx, PlayState* play2) {
     Gfx_SetupDL_25Xlu(play->state.gfxCtx);
     Matrix_Scale(0.02f, 0.02f, 0.02f, MTXMODE_APPLY);
     gSPMatrix(POLY_XLU_DISP++, MATRIX_NEWMTX(play->state.gfxCtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+
+    // FD (2026-07-12): Fierce Deity sword-beam blade (RE z_en_m_thunder.c:424-455). Drawn instead of the spin
+    // trail/charge glow. subtype >= SWORDBEAM_GREAT is set only by the FD beam Init path, so the vanilla spin
+    // (subtype 0) takes the else branch below, unaffected. The beam has no charge glow (chargeAlpha stays 0).
+    // NOTE: cannot early-return here -- OPEN_DISPS/CLOSE_DISPS are a matched brace pair, so the spin path is
+    // wrapped in the else and a single CLOSE_DISPS closes the block at the end.
+    if (this->subtype >= ENMTHUNDER_SUBTYPE_SWORDBEAM_GREAT) {
+        gSPSegment(POLY_XLU_DISP++, 0x08,
+                   Gfx_TwoTexScroll(play->state.gfxCtx, 0, 0, 0, 16, 64, 1, 0,
+                                    0x1FF - ((u16)(s32)(this->spinTrailTexScroll * 10.0f) & 0x1FF), 32, 128));
+        if (this->subtype == ENMTHUNDER_SUBTYPE_SWORDBEAM_GREAT) {
+            gDPSetPrimColor(POLY_XLU_DISP++, 0, 0x80, 0, 255, 255, (u16)(this->spinAttackAlpha * 255.0f));
+            gDPSetEnvColor(POLY_XLU_DISP++, 200, 200, 200, 128);
+        } else {
+            gDPSetPrimColor(POLY_XLU_DISP++, 0, 0x80, 170, 255, 255, (u16)(this->spinAttackAlpha * 255.0f));
+            gDPSetEnvColor(POLY_XLU_DISP++, 0, 100, 255, 128);
+        }
+        gSPDisplayList(POLY_XLU_DISP++, gUnusedBeamBladeDL);
+    } else {
 
     switch (this->attackStrength) {
         case 0:
@@ -427,6 +544,8 @@ void EnMThunder_Draw(Actor* thisx, PlayState* play2) {
                                   0, 20, phi_t1));
 
     gSPDisplayList(POLY_XLU_DISP++, gSpinAttackChargingDL);
+
+    } // FD (2026-07-12): end else (vanilla spin/charge draw); beam path skips all of the above
 
     CLOSE_DISPS(play->state.gfxCtx);
 }

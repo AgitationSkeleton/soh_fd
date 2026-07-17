@@ -3,11 +3,13 @@
 #include <string>
 #include <vector>
 
+#include <libultraship/libultraship.h>
 #include <libultraship/controller/controldeck/ControlDeck.h>
 
-#include "randomizer_check_objects.h"
 #include "randomizer_check_tracker.h"
 #include "randomizer_item_tracker.h"
+#include "randomizerTypes.h"
+#include "soh/cvar_prefixes.h"
 #include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/OTRGlobals.h"
 #include "soh/ResourceManagerHelpers.h"
@@ -17,7 +19,6 @@
 #include "soh/SohGui/UIWidgets.hpp"
 #include "soh/util.h"
 #include "soh/Enhancements/randomizer/randomizer.h"
-#include "soh/Enhancements/randomizer/dungeon.h"
 
 #include <fast/Fast3dGui.h>
 
@@ -35,6 +36,7 @@ void DrawDungeonItem(ItemTrackerItem item);
 void DrawBottle(ItemTrackerItem item);
 void DrawQuest(ItemTrackerItem item);
 void DrawSong(ItemTrackerItem item);
+void DrawFierceDeityMask(ItemTrackerItem item); // FD (2026-07-11)
 
 int itemTrackerSectionId;
 
@@ -139,6 +141,14 @@ std::vector<ItemTrackerItem> triforcePieces = {
 
 std::vector<ItemTrackerItem> rocsFeather = {
     ITEM_TRACKER_ITEM(RG_ROCS_FEATHER, 0, DrawItem),
+};
+
+// FD (2026-07-11): Fierce Deity's Mask tracker entry. Non-rando feature -> shown when
+// gSaveContext.ship.hasFierceDeityMask is set. Uses ITEM_MASK_DEITY as its id but a dedicated draw
+// function so it never hits the OOB gItemSlots/INV_CONTENT path in DrawItem. The texture name
+// "FierceDeityMask" is registered in ImGuiUtils.cpp customItemsMapping.
+std::vector<ItemTrackerItem> fierceDeityMask = {
+    ITEM_TRACKER_ITEM_CUSTOM(ITEM_MASK_DEITY, FierceDeityMask, FierceDeityMask, 0, DrawFierceDeityMask),
 };
 
 std::vector<ItemTrackerItem> swimItems = {
@@ -488,13 +498,12 @@ bool HasEquipment(ItemTrackerItem item) {
     return GameInteractor::IsSaveLoaded() ? (item.data & gSaveContext.inventory.equipment) : false;
 }
 
-void ItemTracker_LoadFromPreset(const nlohmann::json& trackerInfo) {
+void ItemTracker_LoadFromPreset(nlohmann::json trackerInfo) {
     presetLoaded = true;
     for (auto window : itemTrackerWindowIDs) {
         if (trackerInfo.contains(window)) {
-            const nlohmann::json& windowInfo = trackerInfo.at(window);
-            presetPos[window] = { windowInfo.at("pos").at("x"), windowInfo.at("pos").at("y") };
-            presetSize[window] = { windowInfo.at("size").at("width"), windowInfo.at("size").at("height") };
+            presetPos[window] = { trackerInfo[window]["pos"]["x"], trackerInfo[window]["pos"]["y"] };
+            presetSize[window] = { trackerInfo[window]["size"]["width"], trackerInfo[window]["size"]["height"] };
         }
     }
 }
@@ -579,50 +588,56 @@ ItemTrackerNumbers GetItemCurrentAndMax(ItemTrackerItem item) {
             // Though the ammo/capacity naming doesn't really make sense for keys, we are
             // hijacking the same system to display key counts as there are enough similarities
             result.currentAmmo = MAX(gSaveContext.inventory.dungeonKeys[item.data], 0);
-            if (item.data == SCENE_THIEVES_HIDEOUT) {
-                std::vector<uint8_t> DoorFlags = THIEVES_HIDEOUT_DOOR_FLAGS;
-                result.currentCapacity = Rando::FindTotalSmallKeys(&gSaveContext, SCENE_THIEVES_HIDEOUT, &DoorFlags);
-                result.maxCapacity = GERUDO_FORTRESS_SMALL_KEY_MAX;
-            } else {
-                result.currentCapacity = OTRGlobals::Instance->gRandoContext->GetDungeons()
-                                             ->GetDungeonFromScene(item.data)
-                                             ->GetTotalSmallKeys(&gSaveContext);
-                switch (item.data) {
-                    case SCENE_FOREST_TEMPLE:
-                        result.maxCapacity = FOREST_TEMPLE_SMALL_KEY_MAX;
-                        break;
-                    case SCENE_FIRE_TEMPLE:
-                        result.maxCapacity = FIRE_TEMPLE_SMALL_KEY_MAX;
-                        if (IS_RANDO &&
-                            !(OTRGlobals::Instance->gRandoContext->GetOption(RSK_KEYSANITY)
-                                  .Is(RO_DUNGEON_ITEM_LOC_ANYWHERE) ||
-                              OTRGlobals::Instance->gRandoContext->GetOption(RSK_KEYSANITY)
-                                  .Is(RO_DUNGEON_ITEM_LOC_OVERWORLD) ||
-                              OTRGlobals::Instance->gRandoContext->GetOption(RSK_KEYSANITY)
-                                  .Is(RO_DUNGEON_ITEM_LOC_ANY_DUNGEON)) &&
-                            OTRGlobals::Instance->gRandoContext->GetDungeon(Rando::FIRE_TEMPLE)->IsVanilla()) {
-                            result.currentCapacity = result.currentCapacity - 1;
+            result.currentCapacity = gSaveContext.ship.stats.dungeonKeys[item.data];
+            switch (item.data) {
+                case SCENE_FOREST_TEMPLE:
+                    result.maxCapacity = FOREST_TEMPLE_SMALL_KEY_MAX;
+                    break;
+                case SCENE_FIRE_TEMPLE:
+                    result.maxCapacity = FIRE_TEMPLE_SMALL_KEY_MAX;
+                    break;
+                case SCENE_WATER_TEMPLE:
+                    result.maxCapacity = WATER_TEMPLE_SMALL_KEY_MAX;
+                    break;
+                case SCENE_SPIRIT_TEMPLE:
+                    result.maxCapacity = SPIRIT_TEMPLE_SMALL_KEY_MAX;
+                    break;
+                case SCENE_SHADOW_TEMPLE:
+                    result.maxCapacity = SHADOW_TEMPLE_SMALL_KEY_MAX;
+                    break;
+                case SCENE_BOTTOM_OF_THE_WELL:
+                    result.maxCapacity = BOTTOM_OF_THE_WELL_SMALL_KEY_MAX;
+                    break;
+                case SCENE_GERUDO_TRAINING_GROUND:
+                    result.maxCapacity = GERUDO_TRAINING_GROUND_SMALL_KEY_MAX;
+                    break;
+                case SCENE_THIEVES_HIDEOUT:
+                    if (IS_RANDO) {
+                        switch (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_GERUDO_FORTRESS)) {
+                            case RO_GF_CARPENTERS_NORMAL:
+                                result.maxCapacity = GERUDO_FORTRESS_SMALL_KEY_MAX;
+                                break;
+                            case RO_GF_CARPENTERS_FAST:
+                                result.maxCapacity = 1;
+                                break;
+                            case RO_GF_CARPENTERS_FREE:
+                                result.maxCapacity = 0;
+                                break;
+                            default:
+                                result.maxCapacity = 0;
+                                SPDLOG_ERROR(
+                                    "Invalid value for RSK_GERUDO_FORTRESS: {}",
+                                    OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_GERUDO_FORTRESS));
+                                assert(false);
+                                break;
                         }
-                        break;
-                    case SCENE_WATER_TEMPLE:
-                        result.maxCapacity = WATER_TEMPLE_SMALL_KEY_MAX;
-                        break;
-                    case SCENE_SPIRIT_TEMPLE:
-                        result.maxCapacity = SPIRIT_TEMPLE_SMALL_KEY_MAX;
-                        break;
-                    case SCENE_SHADOW_TEMPLE:
-                        result.maxCapacity = SHADOW_TEMPLE_SMALL_KEY_MAX;
-                        break;
-                    case SCENE_BOTTOM_OF_THE_WELL:
-                        result.maxCapacity = BOTTOM_OF_THE_WELL_SMALL_KEY_MAX;
-                        break;
-                    case SCENE_GERUDO_TRAINING_GROUND:
-                        result.maxCapacity = GERUDO_TRAINING_GROUND_SMALL_KEY_MAX;
-                        break;
-                    case SCENE_INSIDE_GANONS_CASTLE:
-                        result.maxCapacity = GANONS_CASTLE_SMALL_KEY_MAX;
-                        break;
-                }
+                    } else {
+                        result.maxCapacity = GERUDO_FORTRESS_SMALL_KEY_MAX;
+                    }
+                    break;
+                case SCENE_INSIDE_GANONS_CASTLE:
+                    result.maxCapacity = GANONS_CASTLE_SMALL_KEY_MAX;
+                    break;
             }
             break;
     }
@@ -757,17 +772,15 @@ void DrawItemCount(ItemTrackerItem item, bool hideMax) {
         ImGui::Text("%s", maxString.c_str());
         ImGui::PopStyleColor();
     } else if (item.id == RG_TRIFORCE_PIECE && IS_RANDO &&
-               (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT_PIECES_TOTAL) > 0) &&
+               (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT) != RO_TRIFORCE_HUNT_OFF) &&
                IsValidSaveFile()) {
         std::string currentString = "";
         std::string requiredString = "";
         std::string maxString = "";
-        uint8_t piecesTotal = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT_PIECES_TOTAL);
-        uint8_t piecesRequired = OTRGlobals::Instance->gRandomizer->GetTriforcePiecesRequired();
-        // If no trigger uses Triforce Pieces they're just filler; gauge progress against the whole pool.
-        if (piecesRequired == 0) {
-            piecesRequired = piecesTotal;
-        }
+        uint8_t piecesRequired =
+            (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT_PIECES_REQUIRED) + 1);
+        uint8_t piecesTotal =
+            (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT_PIECES_TOTAL) + 1);
         ImU32 currentColor = gSaveContext.ship.quest.data.randomizer.triforcePiecesCollected >= piecesRequired
                                  ? IM_COL_GREEN
                                  : IM_COL_WHITE;
@@ -830,15 +843,11 @@ void DrawQuest(ItemTrackerItem item) {
 };
 
 bool HasBossSoul(RandomizerInf bossSoul) {
-    if (!IS_RANDO) {
-        return false;
-    } else if (bossSoul == RAND_INF_GANON_SOUL) {
-        return OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_GANONS_SOUL) == RO_GANONS_SOUL_STARTWITH ||
-               Flags_GetRandomizerInf(RAND_INF_GANON_SOUL);
-    } else {
-        return OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_BOSS_SOULS) &&
-               Flags_GetRandomizerInf(bossSoul);
-    }
+    uint8_t soulSetting = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_BOSS_SOULS);
+    bool isSoulRandomized = IS_RANDO && (soulSetting == RO_BOSS_SOULS_ON_PLUS_GANON ||
+                                         (soulSetting == RO_BOSS_SOULS_ON && bossSoul != RAND_INF_GANON_SOUL));
+
+    return isSoulRandomized ? Flags_GetRandomizerInf(bossSoul) : true;
 }
 
 void DrawItem(ItemTrackerItem item) {
@@ -892,8 +901,8 @@ void DrawItem(ItemTrackerItem item) {
             break;
         case RG_TRIFORCE_PIECE:
             actualItemId = item.id;
-            hasItem = IS_RANDO &&
-                      (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT_PIECES_TOTAL) > 0);
+            hasItem = IS_RANDO && (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_TRIFORCE_HUNT) !=
+                                   RO_TRIFORCE_HUNT_OFF);
             itemName = "Triforce Piece";
             break;
         case ITEM_NAYRUS_LOVE:
@@ -1275,7 +1284,7 @@ void DrawItem(ItemTrackerItem item) {
         ImGui::PopStyleColor();
     }
 
-    if (item.id == RG_BRONZE_SCALE) {
+    if (item.id >= RG_BRONZE_SCALE && item.id <= RG_OPEN_CHEST) {
         ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::SetCursorScreenPos(
             ImVec2(p.x + (iconSize / 2) - (ImGui::CalcTextSize(itemName.c_str()).x / 2), p.y - (iconSize + 2)));
@@ -1311,6 +1320,21 @@ void DrawBottle(ItemTrackerItem item) {
 
     Tooltip(SohUtils::GetItemName(item.id).c_str());
 };
+
+// FD (2026-07-11): Draw the Fierce Deity's Mask tracker icon. Has-item is driven by the non-rando
+// persistent flag gSaveContext.ship.hasFierceDeityMask (there is no RandomizerInf for this item).
+void DrawFierceDeityMask(ItemTrackerItem item) {
+    float iconSize = static_cast<float>(CVarGetInteger(CVAR_TRACKER_ITEM("IconSize"), 36));
+    bool hasItem = GameInteractor::IsSaveLoaded() && gSaveContext.ship.hasFierceDeityMask;
+
+    ImGui::BeginGroup();
+    ImGui::Image(std::dynamic_pointer_cast<Fast::Fast3dGui>(Ship::Context::GetRawInstance()->GetWindow()->GetGui())
+                     ->GetTextureByName(hasItem && IsValidSaveFile() ? item.name : item.nameFaded),
+                 ImVec2(iconSize, iconSize), ImVec2(0, 0), ImVec2(1, 1));
+    ImGui::EndGroup();
+
+    Tooltip("Fierce Deity's Mask");
+}
 
 void DrawDungeonItem(ItemTrackerItem item) {
     uint32_t itemId = item.id;
@@ -1635,6 +1659,16 @@ void UpdateVectors() {
     }
     if (IS_RANDO && RAND_GET_OPTION(RSK_ROCS_FEATHER)) {
         mainWindowItems.insert(mainWindowItems.end(), rocsFeather.begin(), rocsFeather.end());
+    }
+    // FD (2026-07-11): Fierce Deity's Mask (non-rando, CVar-gated). If Roc's Feather is showing, place the
+    // mask to its right (same row); otherwise pad to a new line so it lands after the songs (Prelude of Light).
+    if (CVarGetInteger(CVAR_ENHANCEMENT("TransformationMasks.Enabled"), 1)) {
+        if (!(IS_RANDO && RAND_GET_OPTION(RSK_ROCS_FEATHER))) {
+            while (mainWindowItems.size() % 6) {
+                mainWindowItems.push_back(ITEM_TRACKER_ITEM(ITEM_NONE, 0, DrawItem));
+            }
+        }
+        mainWindowItems.insert(mainWindowItems.end(), fierceDeityMask.begin(), fierceDeityMask.end());
     }
     if (IS_RANDO && RAND_GET_OPTION(RSK_SHUFFLE_SWIM)) {
         mainWindowItems.insert(mainWindowItems.end(), swimItems.begin(), swimItems.end());

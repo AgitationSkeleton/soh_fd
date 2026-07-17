@@ -1,4 +1,4 @@
-﻿#include "OTRGlobals.h"
+#include "OTRGlobals.h"
 #include "OTRAudio.h"
 #include <algorithm>
 #include <atomic>
@@ -8,12 +8,13 @@
 #include <chrono>
 #include <optional>
 #include <imgui.h>
+#include <unordered_map>
+#include <mutex>
+#include <string>
+#include <dr_wav.h> // FD (2026-07-12): custom-WAV one-shot decode for FdAudio_PlayOneShot
 
 #include "ResourceManagerHelpers.h"
 #include <fast/Fast3dWindow.h>
-#include <libultraship/bridge/audiobridge.h>
-#include <libultraship/bridge/gfxdebuggerbridge.h>
-#include <libultraship/bridge/windowbridge.h>
 #include <ship/Context.h>
 #include <ship/resource/File.h>
 #include <ship/window/Window.h>
@@ -27,8 +28,6 @@
 #include <time.h>
 #endif
 #include <ship/audio/AudioPlayer.h>
-#include <ship/resource/archive/O2rArchive.h>
-#include <ship/utils/binarytools/MemoryStream.h>
 #include "Enhancements/speechsynthesizer/SpeechSynthesizer.h"
 #include "Enhancements/controls/SohInputEditorWindow.h"
 #include "Enhancements/audio/AudioCollection.h"
@@ -38,6 +37,7 @@
 #include "Enhancements/randomizer/randomizer_check_tracker.h"
 #include "Enhancements/randomizer/static_data.h"
 #include "soh/Enhancements/randomizer/settings.h"
+#include "Enhancements/gameplaystats.h"
 #include "soh/Enhancements/savestates.h"
 #include "frame_interpolation.h"
 #include "SohGui/SohMenu.h"
@@ -57,6 +57,7 @@
 
 #if not defined(__SWITCH__) && not defined(__WIIU__)
 #include "Extractor/Extract.h"
+#include "Extractor/FdO2rGen.h"
 #endif
 
 #include <fast/interpreter.h>
@@ -76,8 +77,8 @@
 
 #include <functions.h>
 #include "Enhancements/item-tables/ItemTableManager.h"
-#include "Enhancements/Restorations/GetItemManipulation.h"
 #include "Enhancements/Lang/Lang.h"
+#include "soh/SohGui/SohGui.hpp"
 #include "soh/SohGui/ImGuiUtils.h"
 #include "ActorDB.h"
 #include "SaveManager.h"
@@ -86,14 +87,30 @@
 #include "soh/Network/Anchor/Anchor.h"
 #include "Enhancements/game-interactor/GameInteractor.h"
 #include "Enhancements/randomizer/draw.h"
+#include <libultraship/libultraship.h>
 #include <libultraship/controller/controldeck/ControlDeck.h>
 #include <fast/resource/ResourceType.h>
 
 // Resource Types/Factories
+#include "soh/resource/type/Array.h"
+#include <ship/resource/type/Blob.h>
+#include <fast/resource/type/DisplayList.h>
 #include <fast/resource/type/Matrix.h>
+#include <fast/resource/type/Texture.h>
+#include <fast/resource/type/Vertex.h>
 #include "soh/resource/type/SohResourceType.h"
 #include "soh/resource/type/Animation.h"
+#include "soh/resource/type/AudioSample.h"
+#include "soh/resource/type/AudioSequence.h"
+#include "soh/resource/type/AudioSoundFont.h"
+#include "soh/resource/type/CollisionHeader.h"
+#include "soh/resource/type/Cutscene.h"
+#include "soh/resource/type/Path.h"
+#include "soh/resource/type/PlayerAnimation.h"
+#include "soh/resource/type/Scene.h"
 #include "soh/resource/type/Skeleton.h"
+#include "soh/resource/type/SkeletonLimb.h"
+#include "soh/resource/type/Text.h"
 #include <ship/resource/factory/BlobFactory.h>
 #include <fast/resource/factory/DisplayListFactory.h>
 #include <fast/resource/factory/MatrixFactory.h>
@@ -116,10 +133,6 @@
 
 #include "soh/config/ConfigUpdaters.h"
 #include "soh/ShipInit.hpp"
-
-#ifdef _MSC_VER
-#define strdup _strdup
-#endif
 
 #ifdef __WIIU__
 const uint32_t defaultImGuiScale = 3;
@@ -370,7 +383,7 @@ bool PathTestCleanup(FILE* tfile) {
             std::filesystem::remove("./text.txt");
         if (std::filesystem::exists("./test/"))
             std::filesystem::remove("./test/");
-    } catch ([[maybe_unused]] std::filesystem::filesystem_error const& ex) { return false; }
+    } catch (std::filesystem::filesystem_error const& ex) { return false; }
     return true;
 }
 
@@ -385,7 +398,7 @@ void CheckAndCreateModFolder() {
                 std::ofstream(filePath).close();
             }
         }
-    } catch ([[maybe_unused]] std::filesystem::filesystem_error const& ex) {
+    } catch (std::filesystem::filesystem_error const& ex) {
         // Couldn't make the folder, continue silently
         return;
     }
@@ -500,7 +513,7 @@ void OTRGlobals::RunExtract(int argc, char* argv[]) {
                         std::filesystem::path tempPath;
                         try {
                             tempPath = std::filesystem::canonical(tempVar);
-                        } catch ([[maybe_unused]] std::filesystem::filesystem_error const& ex) {
+                        } catch (std::filesystem::filesystem_error const& ex) {
                             std::string userPath = getenv("USERPROFILE");
                             userPath.append("\\AppData\\Local\\Temp");
                             tempPath = std::filesystem::canonical(userPath);
@@ -524,7 +537,7 @@ void OTRGlobals::RunExtract(int argc, char* argv[]) {
                         bool error = false;
                         try {
                             create_directories(tfolder);
-                        } catch ([[maybe_unused]] std::filesystem::filesystem_error const& ex) { error = true; }
+                        } catch (std::filesystem::filesystem_error const& ex) { error = true; }
                         if (tfile == NULL || error) {
                             SohGui::RegisterPopup("SoH Permissions Error",
                                                   "SoH does not have proper file permissions.\nPlease move it to a "
@@ -764,6 +777,14 @@ void OTRGlobals::RunExtract(int argc, char* argv[]) {
         ImGui::PopStyleColor(2);
     }
 
+    // FD (2026-07-16): after the OoT ROM is in place, generate fd.o2r from a Majora's Mask ROM the same way
+    // (this fork ships no game assets). Runs once, when fd.o2r is absent; declining or having no MM ROM just
+    // launches as normal SoH without the Fierce Deity form. Uses blocking dialogs since the extraction loop
+    // above has finished.
+    if (FdO2rGen::NeedsGeneration(appShortName)) {
+        FdO2rGen::Generate(installPath, dataPath, appShortName);
+    }
+
 #ifdef __SWITCH__
     Ship::Switch::Init(Ship::PreInitPhase);
 #elif defined(__WIIU__)
@@ -796,6 +817,15 @@ void OTRGlobals::Initialize() {
         context->GetResourceManager()->GetArchiveManager()->AddArchive(ootPath);
     }
 
+    // FD (2026-07-12) #2: load fd.o2r as a first-class archive from the Release/app dir (beside soh.o2r),
+    // NOT from mods/. Added last so its resources overlay gameplay_keep / object_link_boy in the base
+    // (ArchiveManager: last archive added wins for a duplicate __OTR__ path). Missing fd.o2r just skips
+    // (boots as vanilla SoH), same as the oot.o2r guard above.
+    std::string fdPath = Ship::Context::LocateFileAcrossAppDirs("fd.o2r", appShortName);
+    if (std::filesystem::exists(fdPath)) {
+        context->GetResourceManager()->GetArchiveManager()->AddArchive(fdPath);
+    }
+
     std::unordered_set<uint32_t> ValidHashes = {
         OOT_PAL_MQ,     OOT_NTSC_JP_MQ, OOT_NTSC_US_MQ, OOT_PAL_GC_MQ_DBG, OOT_NTSC_US_10,
         OOT_NTSC_US_11, OOT_NTSC_US_12, OOT_PAL_10,     OOT_PAL_11,        OOT_NTSC_JP_GC_CE,
@@ -812,7 +842,7 @@ void OTRGlobals::Initialize() {
     auto logLevel =
         static_cast<spdlog::level::level_enum>(CVarGetInteger(CVAR_DEVELOPER_TOOLS("LogLevel"), defaultLogLevel));
     context->InitLogging(logLevel, logLevel);
-    Ship::Context::GetRawInstance()->GetLogger()->set_pattern("[%H:%M:%S.%e] [%s:%#] [%^%l%$] %v");
+    Ship::Context::GetRawInstance()->GetLogger()->set_pattern("[%H:%M:%S.%e] [%s:%#] [%l] %v");
 
     InitGfxDebugger();
     context->InitFileDropMgr();
@@ -827,15 +857,7 @@ void OTRGlobals::Initialize() {
                                               CVarGetInteger(CVAR_SETTING("AutoCaptureMouse"), 1));
     context->GetWindow()->SetForceCursorVisibility(CVarGetInteger(CVAR_SETTING("CursorVisibility"), 0));
 
-    context->InitAudio({ .SampleRate = 32000,
-                         .SampleLength = 1024,
-                         // 4096 frames at 32 kHz (~128 ms) gives enough reservoir for frame
-                         // jitter and slow-frame spikes without perceptible audio latency.
-                         .DesiredBuffered = 4096 });
-
-    // The menu is set up before audio is initialized, so its list of available audio backends has to be
-    // populated here rather than in Menu::InitElement (where the window backends are handled).
-    SohGui::GetSohMenu()->UpdateAudioBackendObjects();
+    context->InitAudio({ .SampleRate = 32000, .SampleLength = 1024, .DesiredBuffered = 1680 });
 
     SPDLOG_INFO("Starting Ship of Harkinian version {} (Branch: {} | Commit: {})", (char*)gBuildVersion,
                 (char*)gGitBranch, (char*)gGitCommitHash);
@@ -1019,101 +1041,282 @@ int AudioPlayer_Buffered(void);
 extern "C" int AudioPlayer_GetDesiredBuffered(void);
 std::unordered_map<std::string, ExtensionEntry> ExtensionCache;
 
-void OTRAudio_Thread() {
-#define SAMPLES_HIGH 560
-#define SAMPLES_MID 544
-#define SAMPLES_LOW 528
-#define AUDIO_FRAMES_PER_UPDATE (R_UPDATE_RATE > 0 ? R_UPDATE_RATE : 1)
-#define NUM_AUDIO_CHANNELS 2
+// FD (2026-07-12) ★ARBITRARY-WAV ONE-SHOT PLAYER (the definitive audio fix). The FD custom transform/fanfare sounds
+// are streamed N64 sequences that LOAD (ducking the BGM) but stay SILENT through the seq/soundfont path, no matter
+// the player or SEQ_MODE. Bypass the entire N64 audio system: decode the source WAVs with drwav and MIX them straight
+// into the audio-thread output buffer (32 kHz interleaved-S16 stereo, the rate AudioMgr_CreateNextAudioBuffer fills).
+// This cannot duck/evict BGM (it just sums on top of the already-synthesized frame), needs no seq player / custom
+// font / seqReplaced. Triggered from z_player.c via FdAudio_PlayOneShot(<wav resource path>).
+static std::mutex sFdAudioMutex;
+static std::unordered_map<std::string, std::vector<int16_t>> sFdPcmCache; // path -> 32kHz interleaved-stereo S16
+struct FdActiveOneShot {
+    const std::vector<int16_t>* pcm = nullptr;
+    size_t cursorFrames = 0;
+};
+static std::vector<FdActiveOneShot> sFdActiveOneShots;
 
-    // The sequencer advances a fixed slice of musical time per engine update
-    // (tempoInternalToExternal in audio_heap.c assumes 60 updates/sec), so with
-    // production paced by backend buffer fill the sample count must average
-    // exactly 32000/60 = 533.33 per update or tempo drifts.
-    // Two thirds 528 one third 544 gives 533.33.
-    int32_t sample_debt_thirds = 0;
-
-    // Single producer routine used by both wake-driven and pre-buffer loops.
-    // Picks per-iteration sample count itself, then produces and plays it.
-    auto produce_next_batch = [&]() {
-        u32 num_audio_samples = sample_debt_thirds > 0 ? SAMPLES_MID : SAMPLES_LOW;
-        sample_debt_thirds += (1600 - 3 * (int32_t)num_audio_samples) * AUDIO_FRAMES_PER_UPDATE;
-
-        const u32 total_frames = num_audio_samples * AUDIO_FRAMES_PER_UPDATE;
-        const u32 total_samples = total_frames * NUM_AUDIO_CHANNELS;
-
-        // 3 is the maximum authentic frame divisor.
-        static thread_local s16 audio_buffer[SAMPLES_HIGH * NUM_AUDIO_CHANNELS * 3];
-
-        for (int i = 0; i < AUDIO_FRAMES_PER_UPDATE; i++) {
-            AudioMgr_CreateNextAudioBuffer(audio_buffer + i * (num_audio_samples * NUM_AUDIO_CHANNELS),
-                                           num_audio_samples);
+// Decode a WAV resource from the loaded archives (e.g. fd.o2r) and linear-resample to 32 kHz interleaved-stereo S16.
+// Cached by path (first play decodes; later plays are instant). Returns nullptr on failure.
+static const std::vector<int16_t>* FdAudio_GetPcm(const std::string& path) {
+    auto it = sFdPcmCache.find(path);
+    if (it != sFdPcmCache.end()) {
+        return &it->second;
+    }
+    std::vector<int16_t> out;
+    auto file = Ship::Context::GetRawInstance()->GetResourceManager()->GetArchiveManager()->LoadFile(path);
+    if (file != nullptr && file->Buffer != nullptr && !file->Buffer->empty()) {
+        drwav wav;
+        if (drwav_init_memory(&wav, file->Buffer->data(), file->Buffer->size(), nullptr)) {
+            drwav_uint64 numFrames = 0;
+            drwav_get_length_in_pcm_frames(&wav, &numFrames);
+            const uint32_t ch = wav.channels ? wav.channels : 1;
+            std::vector<int16_t> src((size_t)numFrames * ch);
+            drwav_read_pcm_frames_s16(&wav, numFrames, src.data());
+            const uint32_t dstRate = 32000; // AudioMgr_CreateNextAudioBuffer output rate (see SAMPLES_HIGH/LOW below)
+            const uint32_t srcRate = wav.sampleRate ? wav.sampleRate : dstRate;
+            const size_t dstFrames = (size_t)((double)numFrames * dstRate / srcRate);
+            out.resize(dstFrames * 2);
+            for (size_t i = 0; i < dstFrames; i++) {
+                const double srcPos = (double)i * srcRate / dstRate;
+                const size_t s0 = (size_t)srcPos;
+                const size_t s1 = (s0 + 1 < (size_t)numFrames) ? s0 + 1 : s0;
+                const double frac = srcPos - (double)s0;
+                for (int c = 0; c < 2; c++) {
+                    const uint32_t srcCh = (ch >= 2) ? (uint32_t)c : 0u;
+                    const int16_t a = src[s0 * ch + srcCh];
+                    const int16_t b = src[s1 * ch + srcCh];
+                    out[i * 2 + c] = (int16_t)(a + (int)((b - a) * frac));
+                }
+            }
+            drwav_uninit(&wav);
         }
+    }
+    auto res = sFdPcmCache.emplace(path, std::move(out));
+    return res.first->second.empty() ? nullptr : &res.first->second;
+}
 
-        AudioPlayer_Play(reinterpret_cast<u8*>(audio_buffer), total_samples * sizeof(int16_t));
+// Returns true if the WAV was found and queued (so callers can fall back to a vanilla sfx when the custom
+// resource is missing, e.g. an old fd.o2r without the FD fall-voice samples). FD (2026-07-13).
+extern "C" bool FdAudio_PlayOneShot(const char* path) {
+    if (path == nullptr) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(sFdAudioMutex);
+    const std::vector<int16_t>* pcm = FdAudio_GetPcm(path);
+    if (pcm == nullptr) {
+        return false;
+    }
+    for (auto& os : sFdActiveOneShots) {
+        if (os.pcm == nullptr) {
+            os.pcm = pcm;
+            os.cursorFrames = 0;
+            return true;
+        }
+    }
+    if (sFdActiveOneShots.size() < 6) {
+        sFdActiveOneShots.push_back({ pcm, 0 });
+        return true;
+    }
+    return false;
+}
+
+// Stop all active FD one-shots immediately (e.g. when the transform/revert cutscene is A-skipped).
+extern "C" void FdAudio_StopOneShots(void) {
+    std::lock_guard<std::mutex> lock(sFdAudioMutex);
+    for (auto& os : sFdActiveOneShots) {
+        os.pcm = nullptr;
+    }
+}
+
+// FD (2026-07-13) NATIVE per-form voice swap. MM's Fierce Deity uses the SAME voice library as OoT adult Link,
+// EXCEPT a set of hurt / effort grunts that MM re-recorded (identified by content-diffing MM's Soundfont_0 against
+// OoT's 00_Sound_Effects_1: the attack / strong-attack / falling / hup / gasp samples are byte-identical, these
+// slots are not). Instead of the arbitrary-WAV mixer (wrong pitch, no reverb, hand-guessed contexts), we swap the
+// actual sample POINTER inside the live font 0 while FD is active, so the game's own synthesizer plays MM's grunt
+// in the EXACT context OoT plays its grunt -- native playback, correct context by construction, and ONLY for
+// Fierce Deity (normal Adult Link's voice is left untouched). SoH samples are RAM-resident resources
+// (AudioLoad_RelocateSample is a no-op), so a direct pointer swap is immediately playable. Slot = the font-0
+// soundEffect index; the MM replacement sample lives in fd.o2r at custom/fd_voice/<slot>.
+extern "C" SoundFontSound* Audio_GetSfx(s32 fontId, s32 sfxId);
+extern "C" s32 AudioLoad_IsFontLoadComplete(s32 fontId);
+
+static const struct {
+    s32 slot;
+    const char* path;
+} sFdVoiceMap[] = {
+    // FD (2026-07-13) NARROWED: MM's font-0 only holds real Fierce Deity samples for the slots FD actually uses in
+    // MM -- the hurt / knocked-back grunts (9..0xE). The slots FD never uses in MM (climb-edge 0x07, dangling-grunt
+    // 0x06, dangling-gasp 0x08/0x19, gasp3 0x12, pant 0x13/0x17, painful-landing 0x18) hold OTHER-form (Goron)
+    // samples, so swapping them played Goron sounds in FD's climb/bonk/fall-damage contexts. Keep only the hurt
+    // family; leave the rest on OoT's adult voice.
+    { 0x09, "custom/fd_voice/09" }, // Hurt 1
+    { 0x0A, "custom/fd_voice/0A" }, // Hurt 2
+    { 0x0B, "custom/fd_voice/0B" }, // Hurt 3
+    { 0x0C, "custom/fd_voice/0C" }, // Hurt 4
+    { 0x0D, "custom/fd_voice/0D" }, // Knocked Back
+    { 0x0E, "custom/fd_voice/0E" }, // Hurt 5
+    // Fall damage: OoT slot 0x18 (Painful Landing). MM's 0x18 is a Goron sound; per user, FD's fall-damage should
+    // be the FD Hurt-4 grunt -- point it at that sample instead of the goron one.
+    { 0x18, "custom/fd_voice/0C" }, // Painful Landing (fall damage) -> FD Hurt 4
+};
+#define FD_VOICE_COUNT (sizeof(sFdVoiceMap) / sizeof(sFdVoiceMap[0]))
+static SoundFontSample* sFdVoiceMMSample[FD_VOICE_COUNT] = { 0 };
+static SoundFontSample* sFdVoiceOoTSample[FD_VOICE_COUNT] = { 0 };
+static std::vector<std::shared_ptr<Ship::IResource>> sFdVoiceResHold;
+static bool sFdVoiceLoaded = false;
+static s32 sFdVoiceApplied = -1; // -1 = unset, 0 = OoT samples live, 1 = MM (deity) samples live
+
+static void FdVoice_LoadSamples() {
+    auto rm = Ship::Context::GetRawInstance()->GetResourceManager();
+    for (size_t i = 0; i < FD_VOICE_COUNT; i++) {
+        auto res = rm->LoadResourceProcess(sFdVoiceMap[i].path);
+        if (res != nullptr) {
+            sFdVoiceResHold.push_back(res); // keep the resource alive; the Sample* points into its memory
+            sFdVoiceMMSample[i] = static_cast<SoundFontSample*>(res->GetRawPointer());
+        }
+    }
+    sFdVoiceLoaded = true;
+}
+
+// FD (2026-07-13) OCARINA CRASH FIX: preload + PIN the FD ocarina resources on the GAME thread. The reported crash
+// was ResourceMgr_LoadGfxByName(gLinkFierceDeityRightHandNearDL) returning NULL at DRAW time (crash in
+// Player_OverrideLimbDrawGameplayDefault, z_player_lib.c:1552) -> access violation. The FD bare-hand DL and the two
+// ocarina meshes are custom fd.o2r resources, and the fairy ocarina additionally pulls in the CHILD object's
+// vtx/tex; loading those lazily mid-draw (especially after the fairy path churns the resource cache) can fail. By
+// loading them once here on the game thread and holding a shared_ptr (so they can never be evicted), every
+// draw-time lookup becomes a cache hit. Idempotent; retries until all five are resident.
+static std::vector<std::shared_ptr<Ship::IResource>> sFdOcarinaPins;
+static bool sFdOcarinaPinned = false;
+extern "C" void FdOcarina_EnsurePinned(void) {
+    if (sFdOcarinaPinned) {
+        return;
+    }
+    // The FD hand itself is gLinkFierceDeityRightHandDL, part of the always-loaded FD model, so it needs no pin.
+    // Only the ocarina-mesh overlays (drawn in Player_PostLimbDrawGameplay) reference resources that can churn out
+    // -- the OoT mesh (adult object) and the Fairy mesh (child object, unloaded while FD is active).
+    static const char* paths[] = {
+        "objects/object_link_boy/gFdOotOcarinaDL",               // FD-held Ocarina of Time mesh
+        "objects/object_link_boy/gFdFairyOcarinaDL",             // FD-held Fairy Ocarina mesh
+        "objects/object_link_child/object_link_childVtx_00E3D0", // fairy ocarina vertices (child object)
+        "objects/object_link_child/gLinkChildFairyOcarinaTex",   // fairy ocarina texture (child object)
     };
+    static bool done[ARRAY_COUNT(paths)] = { false };
+    auto rm = Ship::Context::GetRawInstance()->GetResourceManager();
+    bool allOk = true;
+    for (size_t i = 0; i < ARRAY_COUNT(paths); i++) {
+        if (done[i]) {
+            continue; // already resident + held; never release it (releasing could re-introduce the racy reload)
+        }
+        auto res = rm->LoadResourceProcess(paths[i]);
+        if (res != nullptr) {
+            sFdOcarinaPins.push_back(res);
+            done[i] = true;
+        } else {
+            allOk = false; // not mounted yet -- retry next frame
+        }
+    }
+    if (allOk) {
+        sFdOcarinaPinned = true;
+    }
+}
 
-    // Self-pump cadence. The gfx thread wakes us once per rendered frame
-    // (Graph_ProcessGfxCommands sets audio.processing), but a single long
-    // frame leave us asleep while the backend's queue drains to silence.
-    // So we also wake on a short timeout, independent of the gfx frame rate.
-    // Doing so is in fact closer to the console, where the audio task ran
-    // off the scheduler rather than gated on rendering..
-    constexpr auto kSelfPumpInterval = std::chrono::milliseconds(5);
+// isDeity: 1 = Fierce Deity active (use MM's grunts), 0 = normal form (use OoT's). Called every gameplay frame; it
+// early-outs unless the form changed. Font 0 (the always-resident SFX bank) never reloads mid-game, so the captured
+// OoT originals stay valid. If fd.o2r lacks the samples, sFdVoiceMMSample[i] stays NULL and that slot is left as
+// OoT (graceful degrade).
+extern "C" void FdVoice_ApplyForm(s32 isDeity) {
+    if (!AudioLoad_IsFontLoadComplete(0)) {
+        return; // font 0 not ready yet (boot / audio reset)
+    }
+    if (!sFdVoiceLoaded) {
+        FdVoice_LoadSamples();
+    }
+    if (sFdVoiceApplied == isDeity) {
+        return;
+    }
+    for (size_t i = 0; i < FD_VOICE_COUNT; i++) {
+        SoundFontSound* se = Audio_GetSfx(0, sFdVoiceMap[i].slot);
+        if (se == NULL) {
+            continue;
+        }
+        if (sFdVoiceOoTSample[i] == NULL) {
+            sFdVoiceOoTSample[i] = se->sample; // capture the OoT original ONCE, before any swap
+        }
+        SoundFontSample* want = isDeity ? sFdVoiceMMSample[i] : sFdVoiceOoTSample[i];
+        if (want != NULL) {
+            se->sample = want;
+        }
+    }
+    sFdVoiceApplied = isDeity;
+}
 
-    // The self-pump timeout must wait that the game has reached its render
-    // loop, to avoid accessing uninitialized variables.
-    bool primed = false;
+// Mix active FD one-shots into the interleaved-stereo S16 output buffer (`frames` frames). Audio-thread only.
+static void FdAudio_Mix(int16_t* buf, size_t frames) {
+    std::lock_guard<std::mutex> lock(sFdAudioMutex);
+    // Match the game's audio config: the N64 synthesis already bakes master+category volume into `buf`, but our
+    // one-shots are mixed AFTER synthesis, so apply master*SFX ourselves (else they blast at full amplitude while
+    // the game plays at the default 40% master). Read once per tick (not per sample). Defaults mirror the engine
+    // (master 40, SFX 100).
+    const float vol = (CVarGetInteger(CVAR_SETTING("Volume.Master"), 40) / 100.0f) *
+                      (CVarGetInteger(CVAR_SETTING("Volume.SFX"), 100) / 100.0f);
+    for (auto& os : sFdActiveOneShots) {
+        if (os.pcm == nullptr) {
+            continue;
+        }
+        const size_t n = os.pcm->size() / 2;
+        for (size_t f = 0; f < frames && os.cursorFrames < n; f++, os.cursorFrames++) {
+            const int l = buf[f * 2] + (int)((*os.pcm)[os.cursorFrames * 2] * vol);
+            const int r = buf[f * 2 + 1] + (int)((*os.pcm)[os.cursorFrames * 2 + 1] * vol);
+            buf[f * 2] = (int16_t)(l < -32768 ? -32768 : (l > 32767 ? 32767 : l));
+            buf[f * 2 + 1] = (int16_t)(r < -32768 ? -32768 : (r > 32767 ? 32767 : r));
+        }
+        if (os.cursorFrames >= n) {
+            os.pcm = nullptr;
+        }
+    }
+}
 
+void OTRAudio_Thread() {
     while (audio.running) {
         {
             std::unique_lock<std::mutex> Lock(audio.mutex);
-            if (!primed) {
-                // Pre-init: block until the gfx thread drives the first buffer
-                // (engine guaranteed ready by then), exactly as before.
-                while (!audio.processing && audio.running) {
-                    audio.cv_to_thread.wait(Lock);
-                }
-                primed = true;
-            } else if (!audio.processing && audio.running) {
-                // Primed: wait for the next gfx wake, but no longer than
-                // kSelfPumpInterval so a stalled gfx thread can't starve the
-                // backend queue. A pending wake falls straight through.
-                audio.cv_to_thread.wait_for(Lock, kSelfPumpInterval);
+            while (!audio.processing && audio.running) {
+                audio.cv_to_thread.wait(Lock);
             }
 
             if (!audio.running) {
                 break;
             }
         }
+        std::unique_lock<std::mutex> Lock(audio.mutex);
+// AudioMgr_ThreadEntry(&gAudioMgr);
+//  528 and 544 relate to 60 fps at 32 kHz 32000/60 = 533.333..
+//  in an ideal world, one third of the calls should use num_samples=544 and two thirds num_samples=528
+#define SAMPLES_HIGH 560
+#define SAMPLES_LOW 528
 
-        {
-            std::unique_lock<std::mutex> Lock(audio.mutex);
+#define AUDIO_FRAMES_PER_UPDATE (R_UPDATE_RATE > 0 ? R_UPDATE_RATE : 1)
+#define NUM_AUDIO_CHANNELS 2
 
-            // Producer guard (banteg/Shipwright#6594): skip advancing the audio
-            // engine if the backend ring cannot accept the largest next burst.
-            // Generating PCM that DoPlay() would refuse creates a discontinuity
-            // audible as a click. The pre-buffer loop below will catch up once
-            // the backend drains enough.
-            if (AudioPlayer_Buffered() + SAMPLES_MID * AUDIO_FRAMES_PER_UPDATE > AudioPlayer_GetDesiredBuffered()) {
-                audio.processing = false;
-            } else {
-                produce_next_batch();
-                audio.processing = false;
-            }
+        int samples_left = AudioPlayer_Buffered();
+        u32 num_audio_samples = samples_left < AudioPlayer_GetDesiredBuffered() ? SAMPLES_HIGH : SAMPLES_LOW;
+
+        // 3 is the maximum authentic frame divisor.
+        s16 audio_buffer[SAMPLES_HIGH * NUM_AUDIO_CHANNELS * 3];
+        for (int i = 0; i < AUDIO_FRAMES_PER_UPDATE; i++) {
+            AudioMgr_CreateNextAudioBuffer(audio_buffer + i * (num_audio_samples * NUM_AUDIO_CHANNELS),
+                                           num_audio_samples);
         }
 
-        // Pre-buffer: fill the reservoir while the backend can accept more,
-        // without waiting for the next frame signal. This absorbs load spikes.
-        // Safe for BGM — the N64 sequencer advances independently of gameplay.
-        // The producer guard (same as above) prevents advancing the audio engine
-        // when the backend ring is already at capacity.
-        while (audio.running && AudioPlayer_Buffered() < AudioPlayer_GetDesiredBuffered()) {
-            if (AudioPlayer_Buffered() + SAMPLES_MID * AUDIO_FRAMES_PER_UPDATE > AudioPlayer_GetDesiredBuffered()) {
-                break;
-            }
-            produce_next_batch();
-        }
+        // FD (2026-07-12): mix any active custom-WAV one-shots on top of the synthesized N64 frame (see
+        // FdAudio_PlayOneShot). num_audio_samples * AUDIO_FRAMES_PER_UPDATE = total interleaved-stereo frames.
+        FdAudio_Mix(audio_buffer, (size_t)num_audio_samples * AUDIO_FRAMES_PER_UPDATE);
+
+        AudioPlayer_Play((u8*)audio_buffer,
+                         num_audio_samples * (sizeof(int16_t) * NUM_AUDIO_CHANNELS * AUDIO_FRAMES_PER_UPDATE));
+
+        audio.processing = false;
+        audio.cv_from_thread.notify_one();
     }
 }
 
@@ -1541,7 +1744,6 @@ extern "C" void InitOTR(int argc, char* argv[]) {
     conf->RegisterVersionUpdater(std::make_shared<SOH::ConfigVersion4Updater>());
     conf->RegisterVersionUpdater(std::make_shared<SOH::ConfigVersion5Updater>());
     conf->RegisterVersionUpdater(std::make_shared<SOH::ConfigVersion6Updater>());
-    conf->RegisterVersionUpdater(std::make_shared<SOH::ConfigVersion7Updater>());
     conf->RunVersionUpdates();
 
     SohGui::SetupGuiElements();
@@ -1570,6 +1772,7 @@ extern "C" void InitOTR(int argc, char* argv[]) {
     VanillaItemTable_Init();
     DebugConsole_Init();
 
+    ActorDB::AddBuiltInCustomActors();
     // #region SOH [Randomizer] TODO: Remove these and refactor spoiler file handling for randomizer
     CVarClear(CVAR_GENERAL("RandomizerNewFileDropped"));
     CVarClear(CVAR_GENERAL("RandomizerDroppedFile"));
@@ -1588,7 +1791,9 @@ extern "C" void InitOTR(int argc, char* argv[]) {
     }
 
     srand(static_cast<unsigned int>(now));
+#ifdef ENABLE_REMOTE_CONTROL
     SDLNet_Init();
+#endif
     if (CVarGetInteger(CVAR_REMOTE_CROWD_CONTROL("Enabled"), 0)) {
         CrowdControl::Instance->Enable();
     }
@@ -1619,7 +1824,9 @@ extern "C" void DeinitOTR() {
     if (CVarGetInteger(CVAR_REMOTE_ANCHOR("Enabled"), 0)) {
         Anchor::Instance->Disable();
     }
+#ifdef ENABLE_REMOTE_CONTROL
     SDLNet_Quit();
+#endif
 
     // Destroying gui here because we have shared ptrs to LUS objects which output to SPDLOG which is destroyed before
     // these shared ptrs.
@@ -1772,8 +1979,7 @@ extern "C" void Graph_StartFrame() {
 #endif
 }
 
-// Interpolated frames of a tick are evenly spaced numerators time+step, time+2*step, ... over denom.
-void RunCommands(Gfx* Commands, int time, int step, int denom, int count) {
+void RunCommands(Gfx* Commands, const std::vector<std::unordered_map<Mtx*, MtxF>>& mtx_replacements) {
     auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(OTRGlobals::Instance->context->GetWindow());
 
     if (wnd == nullptr) {
@@ -1789,11 +1995,8 @@ void RunCommands(Gfx* Commands, int time, int step, int denom, int count) {
     UIWidgets::Colors themeColor =
         static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), UIWidgets::Colors::LightBlue));
     ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIWidgets::ColorValues.at(themeColor));
-    for (int i = 0; i < count; i++) {
-        time += step;
-        std::unordered_map<Mtx*, MtxF> mtx_replacements =
-            (time == denom) ? std::unordered_map<Mtx*, MtxF>() : FrameInterpolation_Interpolate((float)time / denom);
-        wnd->DrawAndRunGraphicsCommands(Commands, mtx_replacements);
+    for (const auto& m : mtx_replacements) {
+        wnd->DrawAndRunGraphicsCommands(Commands, m);
         intp->mInterpolationIndex++;
     }
     ImGui::PopStyleColor();
@@ -1807,6 +2010,7 @@ extern "C" void Graph_ProcessGfxCommands(Gfx* commands) {
     }
 
     audio.cv_to_thread.notify_one();
+    std::vector<std::unordered_map<Mtx*, MtxF>> mtx_replacements;
     int target_fps = OTRGlobals::Instance->GetInterpolationFPS();
     static int last_fps;
     static int last_update_rate;
@@ -1826,11 +2030,13 @@ extern "C" void Graph_ProcessGfxCommands(Gfx* commands) {
     // time_base = fps * original_fps (one second)
     int next_original_frame = fps;
 
-    int start_time = time;
-    int count = 0;
     while (time + original_fps <= next_original_frame) {
         time += original_fps;
-        count++;
+        if (time != next_original_frame) {
+            mtx_replacements.push_back(FrameInterpolation_Interpolate((float)time / next_original_frame));
+        } else {
+            mtx_replacements.emplace_back();
+        }
     }
 
     time -= fps;
@@ -1839,18 +2045,23 @@ extern "C" void Graph_ProcessGfxCommands(Gfx* commands) {
         wnd->SetTargetFps(fps);
     }
 
-    int step = original_fps;
     // When the gfx debugger is active, only run with the final mtx
     if (GfxDebuggerIsDebugging()) {
-        start_time = next_original_frame;
-        step = 0;
-        count = 1;
+        mtx_replacements.clear();
+        mtx_replacements.emplace_back();
     }
 
-    RunCommands(commands, start_time, step, next_original_frame, count);
+    RunCommands(commands, mtx_replacements);
 
     last_fps = fps;
     last_update_rate = R_UPDATE_RATE;
+
+    {
+        std::unique_lock<std::mutex> Lock(audio.mutex);
+        while (audio.processing) {
+            audio.cv_from_thread.wait(Lock);
+        }
+    }
 
     bool curAltAssets = CVarGetInteger(CVAR_SETTING("AltAssets"), 1);
     if (prevAltAssets != curAltAssets) {
@@ -2350,11 +2561,6 @@ extern "C" ShopItemIdentity Randomizer_IdentifyShopItem(s32 sceneNum, u8 slotInd
 }
 
 extern "C" GetItemEntry ItemTable_Retrieve(int16_t getItemID) {
-    // A negative getItemId makes the vanilla lookup `sGetItemTable[getItemId - 1]` read out of
-    // bounds below the table (Get Item Manipulation); reproduce the console result of that read.
-    if (getItemID < 0) {
-        return Gim_RetrieveOobGetItemEntry(getItemID);
-    }
     GetItemEntry giEntry = ItemTableManager::Instance->RetrieveItemEntry(MOD_NONE, getItemID);
     return giEntry;
 }
@@ -2533,5 +2739,5 @@ bool SoH_HandleConfigDrop(char* filePath) {
 
 // Number of interpolated frames
 extern "C" uint32_t Ship_GetInterpolationFrameCount() {
-    return static_cast<uint32_t>(ceil((float)OTRGlobals::Instance->GetInterpolationFPS() / 20.0f));
+    return ceil((float)OTRGlobals::Instance->GetInterpolationFPS() / 20.0f);
 }

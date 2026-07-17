@@ -15,7 +15,6 @@
 #include "vt.h"
 #include "soh/ResourceManagerHelpers.h"
 #include "soh/Enhancements/game-interactor/GameInteractor_Hooks.h"
-#include "soh/Enhancements/savestate_serialize.h"
 
 #define FLAGS ACTOR_FLAG_UPDATE_CULLING_DISABLED
 
@@ -417,7 +416,7 @@ void EnXc_SetWalkingSFX(EnXc* this, PlayState* play) {
     s32 pad2;
 
     if (Animation_OnFrame(&this->skelAnime, 11.0f) || Animation_OnFrame(&this->skelAnime, 23.0f)) {
-        if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+        if (this->actor.bgCheckFlags & 1) {
             sfxId = SFX_FLAG;
             sfxId += SurfaceType_GetSfx(&play->colCtx, this->actor.floorPoly, this->actor.floorBgId);
             Sfx_PlaySfxAtPos(&this->actor.projectedPos, sfxId);
@@ -431,7 +430,7 @@ void EnXc_SetNutThrowSFX(EnXc* this, PlayState* play) {
     s32 pad2;
 
     if (Animation_OnFrame(&this->skelAnime, 7.0f)) {
-        if (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) {
+        if (this->actor.bgCheckFlags & 1) {
             sfxId = SFX_FLAG;
             sfxId += SurfaceType_GetSfx(&play->colCtx, this->actor.floorPoly, this->actor.floorBgId);
             Sfx_PlaySfxAtPos(&this->actor.projectedPos, sfxId);
@@ -446,7 +445,7 @@ void EnXc_SetLandingSFX(EnXc* this, PlayState* play) {
     u32 sfxId;
     s16 sceneNum = play->sceneNum;
 
-    if ((gSaveContext.sceneLayer != 4) || (sceneNum != SCENE_DESERT_COLOSSUS)) {
+    if ((gSaveContext.sceneSetupIndex != 4) || (sceneNum != SCENE_DESERT_COLOSSUS)) {
         if (Animation_OnFrame(&this->skelAnime, 11.0f)) {
             sfxId = SFX_FLAG;
             sfxId += SurfaceType_GetSfx(&play->colCtx, this->actor.floorPoly, this->actor.floorBgId);
@@ -459,7 +458,7 @@ void EnXc_SetColossusAppearSFX(EnXc* this, PlayState* play) {
     static Vec3f sXyzDist;
     s16 sceneNum;
 
-    if (gSaveContext.sceneLayer == 4) {
+    if (gSaveContext.sceneSetupIndex == 4) {
         sceneNum = play->sceneNum;
         if (sceneNum == SCENE_DESERT_COLOSSUS) {
             CutsceneContext* csCtx = &play->csCtx;
@@ -485,16 +484,16 @@ void EnXc_SetColossusAppearSFX(EnXc* this, PlayState* play) {
 void func_80B3D118(PlayState* play) {
     s16 sceneNum;
 
-    if ((gSaveContext.sceneLayer != 4) || (sceneNum = play->sceneNum, sceneNum != SCENE_DESERT_COLOSSUS)) {
+    if ((gSaveContext.sceneSetupIndex != 4) || (sceneNum = play->sceneNum, sceneNum != SCENE_DESERT_COLOSSUS)) {
         Sfx_PlaySfxCentered2(NA_SE_PL_SKIP);
     }
 }
 
 static Vec3f D_80B42DA0;
 
-static s32 D_80B41D90 = 0;
+s32 D_80B41D90 = 0;
 void EnXc_SetColossusWindSFX(PlayState* play) {
-    if (gSaveContext.sceneLayer == 4) {
+    if (gSaveContext.sceneSetupIndex == 4) {
         static Vec3f sPos = { 0.0f, 0.0f, 0.0f };
         static f32 sMaxSpeed = 0.0f;
         static Vec3f D_80B42DB0;
@@ -529,17 +528,17 @@ void EnXc_SetColossusWindSFX(PlayState* play) {
     }
 }
 
-static s32 sFlameSpawned = false;
+s32 sEnXcFlameSpawned = false;
 void EnXc_SpawnFlame(EnXc* this, PlayState* play) {
 
-    if (!sFlameSpawned) {
+    if (!sEnXcFlameSpawned) {
         CsCmdActorCue* npcAction = EnXc_GetCsCmd(play, 0);
         f32 xPos = npcAction->startPos.x;
         f32 yPos = npcAction->startPos.y;
         f32 zPos = npcAction->startPos.z;
 
         this->flameActor = Actor_Spawn(&play->actorCtx, play, ACTOR_EN_LIGHT, xPos, yPos, zPos, 0, 0, 0, 5);
-        sFlameSpawned = true;
+        sEnXcFlameSpawned = true;
     }
 }
 
@@ -564,7 +563,7 @@ void EnXc_DestroyFlame(EnXc* this) {
     Actor_Kill(&this->actor);
 }
 
-static s32 D_80B41DA8 = 1;
+s32 D_80B41DA8 = 1;
 void EnXc_InitFlame(EnXc* this, PlayState* play) {
     s32 pad;
     s16 sceneNum = play->sceneNum;
@@ -1443,16 +1442,7 @@ void func_80B3F534(PlayState* play) {
     }
 }
 
-static s32 D_80B41DAC = 1;
-
-#define EN_XC_SHIP_SAVESTATE_FIELDS(F) \
-    F(D_80B41D90)                      \
-    F(sFlameSpawned)                   \
-    F(D_80B41DA8)                      \
-    F(D_80B41DAC)
-
-SHIP_SAVESTATE_DEFINE(EnXc, EN_XC_SHIP_SAVESTATE_FIELDS)
-
+s32 D_80B41DAC = 1;
 void func_80B3F59C(EnXc* this, PlayState* play) {
     CsCmdActorCue* npcAction = EnXc_GetCsCmd(play, 0);
 
@@ -2234,7 +2224,7 @@ void EnXc_SetupDialogueAction(EnXc* this, PlayState* play) {
         } else {
             this->actor.textId = 0x700F; //"You need another skill"
         }
-        Actor_OfferTalkNearColChkInfoCylinder(&this->actor, play);
+        func_8002F2F4(&this->actor, play);
     }
 }
 
@@ -2489,7 +2479,7 @@ const ActorInit En_Xc_InitVars = {
 
 void EnXc_Reset(void) {
     D_80B41D90 = 0;
-    sFlameSpawned = false;
+    sEnXcFlameSpawned = false;
     D_80B41DA8 = 1;
     D_80B41DAC = 1;
 }

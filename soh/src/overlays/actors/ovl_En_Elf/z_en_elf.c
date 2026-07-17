@@ -869,7 +869,7 @@ void func_80A03CF8(EnElf* this, PlayState* play) {
             func_80A02C98(this, &nextPos, 0.2f);
         }
 
-        if ((play->sceneNum == SCENE_LINKS_HOUSE) && (gSaveContext.sceneLayer == 4)) {
+        if ((play->sceneNum == SCENE_LINKS_HOUSE) && (gSaveContext.sceneSetupIndex == 4)) {
             // play dash sound as Navi enters Links house in the intro
             if (play->csCtx.frames == 55) {
                 Audio_PlayActorSound2(&this->actor, NA_SE_EV_FAIRY_DASH);
@@ -1343,6 +1343,7 @@ void func_80A05208(Actor* thisx, PlayState* play) {
 // ask to talk to saria
 void func_80A052F4(Actor* thisx, PlayState* play) {
     EnElf* this = (EnElf*)thisx;
+    u16 textId = play->msgCtx.textId; // FD (2026-07-12) #7: capture before the choice dispatch
 
     func_80A04DE4(this, play);
 
@@ -1350,15 +1351,33 @@ void func_80A052F4(Actor* thisx, PlayState* play) {
         if (Message_ShouldAdvance(play)) {
             play->msgCtx.unk_E3F2 = 0xFF;
 
-            switch (play->msgCtx.choiceIndex) {
-                case 0: // yes
-                    this->actor.update = func_80A05188;
-                    Message_ContinueTextbox(play, 0xE2);
-                    break;
-                case 1: // no
-                    this->actor.update = func_80A05208;
-                    Message_ContinueTextbox(play, 0xE1);
-                    break;
+            // FD (2026-07-12) #7: the transformation-mask water-safeguard two-choice (0x71B5). "Yes"
+            // (choiceIndex 0) reverts the form back to the stashed human age (RE z_en_elf.c:1354). ageChangeFlag
+            // set to a non-deity age drives the existing FD white-fade revert; fierceDeityPreviousForm==0xFF
+            // means "not transformed" (nothing to revert). Then just close the textbox and let Navi return.
+            if (textId == 0x71B5) {
+                if ((play->msgCtx.choiceIndex == 0) && (gSaveContext.ship.fierceDeityPreviousForm != 0xFF)) {
+                    play->ageChangeFlag = gSaveContext.ship.fierceDeityPreviousForm;
+                    // FD (2026-07-15): play the "shing" flash sfx as the white-fade revert starts, so this
+                    // auto-untransform matches the manual transform/revert cutscene (z_player.c:4205) and the
+                    // boss blue-warp auto-revert (z_door_warp1.c:52) -- all three use NA_SE_EV_TRIFORCE_FLASH.
+                    Sfx_PlaySfxCentered(NA_SE_EV_TRIFORCE_FLASH);
+                }
+                Message_CloseTextbox(play);
+                this->actor.update = func_80A053F0;
+                func_80A01C38(this, 0);
+                this->fairyFlags &= ~0x20;
+            } else {
+                switch (play->msgCtx.choiceIndex) {
+                    case 0: // yes
+                        this->actor.update = func_80A05188;
+                        Message_ContinueTextbox(play, 0xE2);
+                        break;
+                    case 1: // no
+                        this->actor.update = func_80A05208;
+                        Message_ContinueTextbox(play, 0xE1);
+                        break;
+                }
             }
         }
     } else if (Actor_TextboxIsClosing(thisx, play)) {

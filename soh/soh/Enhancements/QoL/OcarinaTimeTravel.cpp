@@ -1,3 +1,4 @@
+#include <libultraship/bridge.h>
 #include "soh/ShipInit.hpp"
 #include "functions.h"
 #include "macros.h"

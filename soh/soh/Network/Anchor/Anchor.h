@@ -3,9 +3,7 @@
 #ifdef __cplusplus
 
 #include "soh/Network/Network.h"
-#include <libultraship/bridge/consolevariablebridge.h>
-#include <ship/window/gui/GuiWindow.h>
-#include <spdlog/spdlog.h>
+#include <libultraship/libultraship.h>
 #include <queue>
 #include <mutex>
 
@@ -58,6 +56,21 @@ typedef struct {
     f32 ocarinaModulator;
     s8 ocarinaBend;
 
+    // FD (2026-07-12): Fierce Deity transform-cutscene state, so remote players SEE another player donning the mask
+    // (held mask -> on-face mask -> scream) and morphing into / out of Fierce Deity. The static FD form already
+    // replicates via linkAge/modelGroup/jointTable; these drive the extra mask draws in Player_PostLimbDrawGameplay.
+    u16 fdStateFlags3;        // player->stateFlags3 (PLAYER_STATE3_TRANSFORMATION_MASK gates the mask draw)
+    u8 fdTransformTargetForm; // player->transformTargetForm
+    u8 fdTransformPrevForm;   // player->transformPreviousForm
+    u8 fdTransformAnim;       // mask anim: 0 none / 1 cl_setmask / 2 cl_setmaskend / 3 cl_maskoff / 4 pz_maskoffstart
+    f32 fdTransformCurFrame;  // skelAnime.curFrame (drives the mask frame windows)
+    f32 fdTransformMod2;      // transformMatrixModifiers[2] (on-face squash)
+    f32 fdTransformMod3;      // transformMatrixModifiers[3] (on-face squash)
+    s16 fdTransformTimer2;    // transformEventTimer2 (scream swirl alpha)
+    u8 fdTransformAnimPrev;   // LOCAL-only: last frame's fdTransformAnim, to edge-detect transform start for audio
+    f32 fdTransformCurFramePrev; // LOCAL-only: last frame's fdTransformCurFrame, to edge-detect the per-frame sfx beats
+    bool fdMaskGi;            // remote is holding up the FD-mask get-item -> dummy must draw the FD mask model, not Goron
+
     // Ptr to the dummy player
     Player* player;
 } AnchorClient;
@@ -75,6 +88,7 @@ class Anchor : public Network {
     uint32_t spawningDummyPlayerForClientId = 0;
     bool shouldRefreshActors = false;
     bool justLoadedSave = false;
+    bool prevHadFierceDeityMask = false; // FD (2026-07-14): edge-detect the mask-obtain to relay it (see HookHandlers)
     bool isHandlingUpdateTeamState = false;
     bool isProcessingIncomingPacket = false;
     std::queue<nlohmann::json> incomingPacketQueue;
