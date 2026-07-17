@@ -1,0 +1,282 @@
+name: release
+# Builds the Fierce Deity fork for Windows / Linux / macOS and publishes a GitHub Release
+# with the three binaries attached. libultraship and ZAPD are vendored into this repo, so the
+# build is self-contained (no submodule forks to fetch).
+#
+# Trigger by pushing a version tag:   git tag v0.1.0 && git push origin v0.1.0
+# or run manually from the Actions tab (workflow_dispatch) and supply the tag to create.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create/publish (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  generate-soh-otr:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Git Checkout
+      uses: actions/checkout@v6
+      with:
+        submodules: true
+    - name: Configure ccache
+      uses: hendrikmuhs/ccache-action@v1.2.22
+      with:
+        key: ${{ runner.os }}-otr-ccache-release
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y $(cat .github/workflows/apt-deps.txt) libzip-dev zipcmp zipmerge ziptool
+    - name: Install latest SDL
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        mkdir -p deps
+        wget https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz
+        tar -xzf SDL2-2.30.3.tar.gz -C deps
+        cd deps/SDL2-2.30.3
+        ./configure --enable-hidapi-libusb
+        make -j 10
+        sudo make install
+        sudo cp -av /usr/local/lib/libSDL* /lib/x86_64-linux-gnu/
+    - name: Install latest tinyxml2
+      run: |
+        sudo apt-get remove libtinyxml2-dev
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        mkdir -p deps
+        wget https://github.com/leethomason/tinyxml2/archive/refs/tags/10.0.0.tar.gz
+        tar -xzf 10.0.0.tar.gz -C deps
+        cd deps/tinyxml2-10.0.0
+        mkdir -p build && cd build
+        cmake ..
+        make
+        sudo make install
+    - name: Generate soh.o2r
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        cmake --no-warn-unused-cli -H. -Bbuild-cmake -GNinja -DCMAKE_BUILD_TYPE:STRING=Release
+        cmake --build build-cmake --config Release --target GenerateSohOtr -j3
+    - name: Upload soh.o2r
+      uses: actions/upload-artifact@v7
+      with:
+        name: soh.o2r
+        path: soh.o2r
+        retention-days: 1
+
+  build-windows:
+    needs: generate-soh-otr
+    runs-on: windows-latest
+    steps:
+    - name: Install dependencies
+      run: |
+        choco install ninja -y
+        Remove-Item -Path "C:\ProgramData\Chocolatey\bin\ccache.exe" -Force -ErrorAction SilentlyContinue
+    - name: Git Checkout
+      uses: actions/checkout@v6
+      with:
+        submodules: true
+    - name: Configure sccache
+      uses: hendrikmuhs/ccache-action@v1.2.22
+      with:
+        variant: sccache
+        max-size: "2G"
+        evict-old-files: job
+        key: ${{ runner.os }}-ccache-release
+    - name: Restore Cached VCPKG folder
+      id: restore-cache-vcpkg
+      uses: actions/cache/restore@v5
+      with:
+        key: ${{ runner.os }}-vcpkg-release
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-
+        path: vcpkg
+    - name: Configure Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
+    - name: Download soh.o2r
+      uses: actions/download-artifact@v7
+      with:
+        name: soh.o2r
+        path: build-windows/soh
+    - name: Build SoH
+      env:
+        VCPKG_ROOT: ${{github.workspace}}/vcpkg
+      run: |
+        set $env:PATH="$env:USERPROFILE/.cargo/bin;$env:PATH"
+        cmake -S . -B build-windows -G Ninja -DCMAKE_MAKE_PROGRAM=ninja -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DBUILD_REMOTE_CONTROL=1
+        cmake --build build-windows --config Release --parallel 10
+        (cd build-windows && cpack)
+        cd ..
+        mv _packages/*.zip _packages/soh_fd-windows.zip
+    - name: Save Cache VCPKG folder
+      if: always()
+      uses: actions/cache/save@v5
+      with:
+        key: ${{ steps.restore-cache-vcpkg.outputs.cache-primary-key }}
+        path: vcpkg
+    - name: Upload release asset
+      uses: actions/upload-artifact@v7
+      with:
+        name: soh_fd-windows
+        path: _packages/soh_fd-windows.zip
+
+  build-linux:
+    needs: generate-soh-otr
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Git Checkout
+      uses: actions/checkout@v6
+      with:
+        submodules: true
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y $(cat .github/workflows/apt-deps.txt)
+    - name: Configure ccache
+      uses: hendrikmuhs/ccache-action@v1.2.22
+      with:
+        key: ${{ runner.os }}-ccache-release
+    - name: Install latest SDL
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        mkdir -p deps
+        wget https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz
+        tar -xzf SDL2-2.30.3.tar.gz -C deps
+        cd deps/SDL2-2.30.3
+        ./configure --enable-hidapi-libusb
+        make -j 10
+        sudo make install
+        sudo cp -av /usr/local/lib/libSDL* /lib/x86_64-linux-gnu/
+    - name: Install latest SDL_net
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        mkdir -p deps
+        wget https://www.libsdl.org/projects/SDL_net/release/SDL2_net-2.2.0.tar.gz
+        tar -xzf SDL2_net-2.2.0.tar.gz -C deps
+        cd deps/SDL2_net-2.2.0
+        ./configure
+        make -j 10
+        sudo make install
+        sudo cp -av /usr/local/lib/libSDL* /lib/x86_64-linux-gnu/
+    - name: Install latest tinyxml2
+      run: |
+        sudo apt-get remove libtinyxml2-dev
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        mkdir -p deps
+        wget https://github.com/leethomason/tinyxml2/archive/refs/tags/10.0.0.tar.gz
+        tar -xzf 10.0.0.tar.gz -C deps
+        cd deps/tinyxml2-10.0.0
+        mkdir -p build && cd build
+        cmake ..
+        make
+        sudo make install
+    - name: Install libzip without crypto
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        mkdir -p deps
+        wget https://github.com/nih-at/libzip/releases/download/v1.10.1/libzip-1.10.1.tar.gz
+        tar -xzf libzip-1.10.1.tar.gz -C deps
+        cd deps/libzip-1.10.1
+        mkdir -p build && cd build
+        cmake .. -DENABLE_COMMONCRYPTO=OFF -DENABLE_GNUTLS=OFF -DENABLE_MBEDTLS=OFF -DENABLE_OPENSSL=OFF
+        make
+        sudo make install
+        sudo cp -av /usr/local/lib/libzip* /lib/x86_64-linux-gnu/
+    - name: Download soh.o2r
+      uses: actions/download-artifact@v7
+      with:
+        name: soh.o2r
+        path: build-cmake/soh
+    - name: Build SoH
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        cmake --no-warn-unused-cli -H. -Bbuild-cmake -GNinja -DCMAKE_BUILD_TYPE:STRING=Release -DBUILD_REMOTE_CONTROL=1
+        cmake --build build-cmake --config Release -j3
+        (cd build-cmake && cpack -G External)
+        mv build-cmake/*.appimage soh_fd-linux.appimage
+      env:
+        CC: gcc-12
+        CXX: g++-12
+    - name: Upload release asset
+      uses: actions/upload-artifact@v7
+      with:
+        name: soh_fd-linux
+        path: soh_fd-linux.appimage
+
+  build-macos:
+    needs: generate-soh-otr
+    runs-on: macos-14
+    steps:
+    - name: Git Checkout
+      uses: actions/checkout@v6
+      with:
+        submodules: true
+    - name: Setup Macports
+      uses: melusina-org/setup-macports@v1
+      with:
+        parameters: '.github/macports.yml'
+    - name: Configure ccache
+      uses: hendrikmuhs/ccache-action@v1.2.22
+      with:
+        key: ${{ runner.os }}-release
+        max-size: "2G"
+        evict-old-files: job
+    - name: Download soh.o2r
+      uses: actions/download-artifact@v7
+      with:
+        name: soh.o2r
+        path: build-cmake/soh
+    - name: Build SoH
+      run: |
+        cmake --no-warn-unused-cli -H. -Bbuild-cmake -GNinja -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DBUILD_REMOTE_CONTROL=1
+        cmake --build build-cmake -j
+        (cd build-cmake && cpack)
+        mv _packages/*.dmg soh_fd-macos.dmg
+    - name: Upload release asset
+      uses: actions/upload-artifact@v7
+      with:
+        name: soh_fd-macos
+        path: soh_fd-macos.dmg
+
+  create-release:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Download all release assets
+      uses: actions/download-artifact@v7
+      with:
+        path: dist
+    - name: Publish GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+        name: Fierce Deity Fork ${{ github.event.inputs.tag || github.ref_name }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+          Ship of Harkinian — Fierce Deity fork build.
+
+          **Requires your own ROMs.** On first launch you'll be prompted for an
+          Ocarina of Time ROM (to generate `oot.o2r`) and a Majora's Mask ROM
+          (to generate `fd.o2r`). No Nintendo assets are distributed here.
+
+          | Platform | Download |
+          |----------|----------|
+          | Windows  | `soh_fd-windows.zip` |
+          | Linux    | `soh_fd-linux.appimage` |
+          | macOS    | `soh_fd-macos.dmg` |
+        files: |
+          dist/soh_fd-windows/soh_fd-windows.zip
+          dist/soh_fd-linux/soh_fd-linux.appimage
+          dist/soh_fd-macos/soh_fd-macos.dmg
