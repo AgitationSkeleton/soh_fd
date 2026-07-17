@@ -205,11 +205,15 @@ install(FILES "${CMAKE_BINARY_DIR}/soh/soh.o2r" DESTINATION . COMPONENT ship)
 install(TARGETS ZAPD DESTINATION ./assets/extractor COMPONENT extractor)
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/extractor/" DESTINATION ./assets COMPONENT extractor)
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/xml/" DESTINATION ./assets/xml COMPONENT extractor)
+# FD: original (non-Nintendo) resources merged into fd.o2r at generation time; must ship in the package.
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/fd_bundled/" DESTINATION ./assets/fd_bundled COMPONENT extractor)
 endif()
 
 if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/extractor/" DESTINATION ./assets/ COMPONENT ship)
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/xml/" DESTINATION ./assets/xml COMPONENT ship)
+# FD: original (non-Nintendo) resources merged into fd.o2r at generation time; must ship in the package.
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/fd_bundled/" DESTINATION ./assets/fd_bundled COMPONENT ship)
 endif()
 
 find_package(Python3 COMPONENTS Interpreter)
@@ -291,6 +295,8 @@ set(PROGRAM_PERMISSIONS_EXECUTE OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECU
 
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/extractor/" DESTINATION ./assets/)
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/xml/" DESTINATION ./assets/xml)
+# FD: original (non-Nintendo) resources merged into fd.o2r at generation time; must ship in the package.
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/soh/assets/fd_bundled/" DESTINATION ./assets/fd_bundled)
 
 # Rename the installed soh binary to drop the macos suffix
 INSTALL(CODE "FILE(RENAME \${CMAKE_INSTALL_PREFIX}/../MacOS/soh-macos \${CMAKE_INSTALL_PREFIX}/../MacOS/soh)")
