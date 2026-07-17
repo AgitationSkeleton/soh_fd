@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write   # required to create the GitHub Release
+  actions: read     # required for download-artifact to list/fetch the build artifacts
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
