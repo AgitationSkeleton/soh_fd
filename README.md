@@ -34,10 +34,12 @@ bundled ZAPD asset extractor over the MM ROM using a curated subset of the MM as
 MM font-0 voice/whip samples (VADPCM) into the exact clips the form uses. The result is byte-accurate to a
 full MM extraction.
 
-**What *is* bundled** are only original, non-Nintendo works, credited below: **Aegiker's** authored
-transformation sounds (created for the OoT Fierce Deity hack, not present in Majora's Mask), the hand-authored
-transform "swirl" effect, the community **MM_Jumps** flip animations, and a few hand-patched display lists.
-Everything sourced from Majora's Mask is generated from your ROM, never shipped.
+**What *is* bundled** are only original works or credited third-party assets: [Aegiker's](https://github.com/Aegiker)
+transformation sound set from the [open-source Fierce Deity hack](https://github.com/Aegiker/fierce-deity-opensrc)
+(a few clips of which Aegiker sourced or edited from Majora's Mask audio), the hand-authored transform "swirl"
+effect, the community **MM_Jumps** flip animations, and a small amount of fork-authored/adapted display-list
+geometry. The Fierce Deity model, textures, and animations themselves are all generated from your Majora's Mask
+ROM at first launch and are never shipped in this repository.
 
 ## Building
 
@@ -51,7 +53,7 @@ This fork stands entirely on other people's work. Enormous thanks to:
 
 - **[Ship of Harkinian](https://github.com/HarbourMasters/Shipwright) & [libultraship](https://github.com/HarbourMasters/libultraship)** — HarbourMasters and the SoH contributors. This fork is built directly on their PC port and runtime; all of their code is the foundation here.
 - **[2 Ship 2 Harkinian](https://github.com/HarbourMasters/2ship2harkinian)** — the SoH-engine Majora's Mask port. Direct source of behavior and reference for this fork: the per-form item-usability table (`gPlayerFormItemRestrictions`), the transform-mask sound behavior, the "Hyrule Warriors Styled Link" reference, and many MM-accurate Fierce Deity mechanics.
-- **Aegiker** — creator of the Ocarina of Time **Fierce Deity / "Transformation Masks" romhack** and the open-source Fierce Deity work that this fork reverse-engineers and re-ports. The FD form, its behaviors, and much of the transform flow originate from that hack.
+- **[Aegiker](https://github.com/Aegiker)** — creator of the Ocarina of Time **Fierce Deity / "Transformation Masks" romhack** and the [open-source Fierce Deity repo](https://github.com/Aegiker/fierce-deity-opensrc) that this fork reverse-engineers and re-ports. The FD form, its behaviors, and much of the transform flow originate from that hack, and the mask's bundled transformation sounds are sourced from it.
 - **[Ocarina of Time](https://github.com/zeldaret/oot) & [Majora's Mask](https://github.com/zeldaret/mm) decompilations (zeldaret)** — the decompiled sources SoH is built from and the authoritative reference for the MM behaviors ported here.
 - **MM_Jumps (ModLoader64 addon)** — the Majora's Mask front-flip and somersault jump animations used by the "MM Jump Flips" feature.
 - **ModLoader64 / Z64Online (OotOnline)** — reference for the planned per-player model-sync design.
