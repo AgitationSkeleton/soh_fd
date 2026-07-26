@@ -503,7 +503,11 @@ static int32_t getRandomWeight(uint32_t totalWeight) {
 
 static void DistributeAndPlaceHints(std::vector<HintDistributionSetting>& distTable, size_t totalStones) {
     auto ctx = Rando::Context::GetInstance();
-    const uint8_t junkIdx = distTable.size();
+    // The caller appends the "Junk" distribution as the last entry before calling this, so its index is
+    // size()-1. (Previously this was size(), one past the Junk entry, so weighted-junk rolls never matched
+    // junkIdx below and fell through to the location-based path -> stones got the empty RHT_NONE "No Hint"
+    // text instead of a junk/flavor hint.)
+    const uint8_t junkIdx = distTable.size() - 1;
 
     // Apply fixed hints upfront (they don't participate in weighted selection)
     for (size_t i = 0; i < distTable.size(); i++) {
