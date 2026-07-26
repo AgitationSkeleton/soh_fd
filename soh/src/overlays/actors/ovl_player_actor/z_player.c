@@ -15757,7 +15757,11 @@ s32 func_8084DFF4(PlayState* play, Player* this) {
                 Audio_PlayFanfare(temp1);
             }
         } else if (giEntry.modIndex == MOD_RANDOMIZER) {
-            if (IS_RANDO) {
+            if (giEntry.itemId == RG_FIERCE_DEITY_MASK) {
+                // FD: a rando-obtained Fierce Deity's Mask plays the same custom "Get a Mask" fanfare as the
+                // cheat/vanilla give (the ITEM_MASK_DEITY branch above), instead of the generic rando fanfare.
+                FdAudio_PlayOneShot("custom/samples/fd/Get_A_Mask.wav");
+            } else if (IS_RANDO) {
                 Audio_PlayFanfare_Rando(giEntry);
             } else if (giEntry.itemId == RG_DOUBLE_DEFENSE || giEntry.itemId == RG_MAGIC_SINGLE ||
                        giEntry.itemId == RG_MAGIC_DOUBLE) {
