@@ -13937,6 +13937,13 @@ static Gfx* sMaskDlists[PLAYER_MASK_MAX - 1] = {
 
 static Vec3s D_80854864 = { 0, 0, 0 };
 
+// FD (2026-07-26) Bonus Settings "Bunny Hood Fit": the child Bunny Hood is authored for Young Link's head and
+// self-loads seg-0x0D slot 7 (the HEAD-limb matrix). On the taller Adult / Fierce Deity heads it sinks in.
+// Player_PostLimbDrawGameplay builds a raised copy of that matrix WHILE the interpolation-tracked head matrix
+// is live on the stack (so it doesn't jitter) and leaves it in gPlayerMaskFitMtxSeg (NULL = no correction).
+// We just rebind seg 0x0D to it here so the hood -- and its ears (they G_MTX_MUL onto slot 7) -- lift together.
+extern Mtx* gPlayerMaskFitMtxSeg;
+
 void Player_DrawGameplay(PlayState* play, Player* this, s32 lod, Gfx* cullDList, OverrideLimbDrawOpa overrideLimbDraw) {
     static s32 D_8085486C = 255;
 
@@ -13944,6 +13951,10 @@ void Player_DrawGameplay(PlayState* play, Player* this, s32 lod, Gfx* cullDList,
 
     gSPSegment(POLY_OPA_DISP++, 0x0C, cullDList);
     gSPSegment(POLY_XLU_DISP++, 0x0C, cullDList);
+
+    // FD (2026-07-26) Bonus Settings "Bunny Hood Fit": cleared before the skeleton draw; the HEAD-limb draw
+    // (Player_PostLimbDrawGameplay) sets it to a raised slot-7 matrix if the hood needs lifting this frame.
+    gPlayerMaskFitMtxSeg = NULL;
 
     Player_DrawImpl(play, this->skelAnime.skeleton, this->skelAnime.jointTable, this->skelAnime.dListCount, lod,
                     this->currentTunic, this->currentBoots, this->actor.shape.face, overrideLimbDraw,
@@ -13976,6 +13987,13 @@ void Player_DrawGameplay(PlayState* play, Player* this, s32 lod, Gfx* cullDList,
             Matrix_SetTranslateRotateYXZ(97.0f, -1203.0f - CVarGetFloat(CVAR_COSMETIC("BunnyHood.EarLength"), 0.0f),
                                          240.0f + CVarGetFloat(CVAR_COSMETIC("BunnyHood.EarSpread"), 0.0f), &earRot);
             MATRIX_TOMTX(bunnyEarMtx);
+        }
+
+        // FD (2026-07-26) Bonus Settings "Bunny Hood Fit": if the head-limb draw built a raised slot-7 matrix,
+        // rebind seg 0x0D to it so the hood (and its seg-0x0B ears, which multiply onto slot 7) lift together.
+        // Nothing drawn after this in the player uses seg 0x0D.
+        if (gPlayerMaskFitMtxSeg != NULL) {
+            gSPSegment(POLY_OPA_DISP++, 0x0D, gPlayerMaskFitMtxSeg);
         }
 
         if (GameInteractor_Should(VB_DRAW_PLAYER_MASK, true, this->currentMask, play)) {

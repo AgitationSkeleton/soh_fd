@@ -132,6 +132,7 @@ source_group("include" FILES ${Header_Files__include})
 # }}}
 
 # soh (root)
+# FD: added soh/Enhancements/FierceDeityTunicColor.cpp (glob re-runs on this reconfigure).
 file(GLOB_RECURSE soh__ RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "soh/*.c" "soh/*.cpp" "soh/*.h" "soh/*.hpp")
 
 # Add specific files that don't match the pattern

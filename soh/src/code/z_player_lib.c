@@ -2034,6 +2034,47 @@ static void Player_DrawMaskInHand(PlayState* play, Player* this) {
     }
 }
 
+// FD (2026-07-26) Bonus Settings "Bunny Hood Fit": the child Bunny Hood self-loads seg-0x0D slot 7 (the HEAD
+// limb's matrix). On the taller Adult / Fierce Deity heads it sinks in. We build a raised copy of slot 7 in
+// the HEAD-limb draw below -- WHILE the interpolation-tracked head matrix is live on the stack, so the raised
+// matrix interpolates every frame like the skeleton does (a hand-built matrix from a snapshot jitters). The
+// result is left in gPlayerMaskFitMtxSeg (an 8-Mtx array whose slot 7 the mask DL loads), or NULL for none.
+// Only the Bunny Hood is corrected; the 7 face masks already sit on the face. Child is never touched.
+// Values are head-local model units (same space as the hood verts); local -Y is up. Tune from in-game feedback.
+Mtx* gPlayerMaskFitMtxSeg;
+#define MASKFIT_BUNNY_ADULT_RAISE 220.0f // head-local units the Bunny Hood lifts on Adult Link
+#define MASKFIT_BUNNY_DEITY_RAISE 100.0f // head-local units the Bunny Hood lifts on Fierce Deity
+#define MASKFIT_BUNNY_ADULT_PITCH 0x0900 // binang backward tilt on Adult Link (~12.7 deg, tucks the eyes back)
+#define MASKFIT_BUNNY_DEITY_PITCH 0x0900 // binang backward tilt on Fierce Deity (~12.7 deg, tucks the eyes back)
+#define MASKFIT_BUNNY_ADULT_SCALE 1.0f   // uniform grow of the hood on Adult Link (1.0 = child size)
+#define MASKFIT_BUNNY_DEITY_SCALE 1.0f   // uniform grow of the hood on Fierce Deity
+
+// Dropdown BonusSettings.MaskFit: 0 Off / 1 Adult / 2 Fierce Deity / 3 Both (default). Returns true (and the
+// head-local raise, backward pitch in binang, and uniform scale) when the current form's Bunny Hood should be
+// corrected.
+static s32 Player_GetBunnyHoodFit(Player* this, f32* raiseY, s16* pitch, f32* scale) {
+    s32 mode = CVarGetInteger(CVAR_ENHANCEMENT("BonusSettings.MaskFit"), 3);
+    s32 formOn;
+
+    if ((mode == 0) || (this->currentMask != PLAYER_MASK_BUNNY)) {
+        return false;
+    }
+    if (LINK_IS_ADULT) {
+        formOn = (mode == 1) || (mode == 3);
+        *raiseY = -MASKFIT_BUNNY_ADULT_RAISE; // -Y = up
+        *pitch = MASKFIT_BUNNY_ADULT_PITCH;
+        *scale = MASKFIT_BUNNY_ADULT_SCALE;
+    } else if (LINK_IS_DEITY) {
+        formOn = (mode == 2) || (mode == 3);
+        *raiseY = -MASKFIT_BUNNY_DEITY_RAISE;
+        *pitch = MASKFIT_BUNNY_DEITY_PITCH;
+        *scale = MASKFIT_BUNNY_DEITY_SCALE;
+    } else {
+        return false; // child (or anything else) keeps vanilla placement
+    }
+    return formOn;
+}
+
 void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList, Vec3s* rot, void* thisx) {
     Player* this = (Player*)thisx;
 
@@ -2343,6 +2384,34 @@ void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList, Ve
                 CLOSE_DISPS(play->state.gfxCtx);
             }
             Matrix_MultVec3f(&D_801260D4, &this->actor.focus.pos);
+            // FD (2026-07-26) Bonus Settings "Bunny Hood Fit": this HEAD-limb matrix is exactly what a worn mask
+            // self-loads (seg-0x0D slot 7). While it is live on the stack, build a raised/scaled copy into an
+            // 8-Mtx array's slot 7 for Player_DrawGameplay to bind. Building it here (not from a snapshot) keeps
+            // it on the same per-frame interpolation path as the skeleton, so the hood doesn't jitter in motion.
+            // Push/Pop is required: the head's child (hat) is drawn next off this same matrix.
+            {
+                f32 fitRaiseY, fitScale;
+                s16 fitPitch;
+
+                gPlayerMaskFitMtxSeg = NULL;
+                if (Player_GetBunnyHoodFit(this, &fitRaiseY, &fitPitch, &fitScale)) {
+                    Mtx* fitMtx = Graph_Alloc(play->state.gfxCtx, 8 * sizeof(Mtx));
+
+                    Matrix_Push();
+                    Matrix_Translate(0.0f, fitRaiseY, 0.0f, MTXMODE_APPLY);
+                    if (fitPitch != 0) {
+                        // Backward tilt is a pitch about world X, which in the head-local frame is local Z
+                        // (head-local X maps to world Z, so RotateX would only roll the hood side to side).
+                        Matrix_RotateZ(fitPitch * (M_PI / 0x8000), MTXMODE_APPLY);
+                    }
+                    if (fitScale != 1.0f) {
+                        Matrix_Scale(fitScale, fitScale, fitScale, MTXMODE_APPLY);
+                    }
+                    MATRIX_TOMTX(&fitMtx[7]); // slot 7 == seg-0x0D offset 0x1C0, the slot the mask DL loads
+                    Matrix_Pop();
+                    gPlayerMaskFitMtxSeg = fitMtx;
+                }
+            }
         } else {
             Vec3f* vec = &sLeftRightFootLimbModelFootPos[(gSaveContext.linkAge)];
 

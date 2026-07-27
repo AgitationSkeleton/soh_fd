@@ -120,6 +120,12 @@ static const std::map<int32_t, const char*> mmFlipsFormValues = {
     { 0, "Off" }, { 1, "Child" }, { 2, "Child + Adult" }, { 3, "Fierce Deity" }, { 4, "All" },
 };
 
+// FD (2026-07-26): per-form gate for the Bunny Hood fit correction (see Bonus Settings). Keep in sync with
+// Player_GetBunnyHoodFit (z_player_lib.c). 0 Off / 1 Adult / 2 Fierce Deity / 3 Both (default).
+static const std::map<int32_t, const char*> maskFitFormValues = {
+    { 0, "Off" }, { 1, "Adult" }, { 2, "Fierce Deity" }, { 3, "Both" },
+};
+
 // FD (2026-07-15): "Unrestrict Items for FD" cheat dropdown (Transformation Masks). Keep in sync with
 // Parameter_CanUseItem (z_parameter.c). 0 Off / 1 Nuts+Bombs+Spells / 2 All except swords+shields.
 static const std::map<int32_t, const char*> fdUnrestrictItemsValues = {
@@ -2004,6 +2010,19 @@ void SohMenu::AddMenuEnhancements() {
     //     .CVar(CVAR_ENHANCEMENT("TransformationMasks.Enabled"))
     //     .Options(CheckboxOptions().Tooltip("Master switch for the transformation mask system."));
 
+    // FD (2026-07-26): give-mask action pinned to the TOP of the menu so it keeps a stable position as new
+    // settings are added below (rather than being pushed down with each new cvar).
+    AddWidget(path, "Give Fierce Deity's Mask", WIDGET_BUTTON)
+        .Options(ButtonOptions()
+                     .Tooltip("Gives you the Fierce Deity's Mask and equips it to a free C button. "
+                              "Must be in-game.")
+                     .Size(Sizes::Inline))
+        .Callback([](WidgetInfo& info) {
+            if (gPlayState != NULL) {
+                GiveFierceDeityMask();
+            }
+        });
+
     AddWidget(path, "Form Rules", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Forms Wear Trade Masks", WIDGET_CVAR_CHECKBOX)
         .CVar(CVAR_CHEAT("TransformationMasks.FormsWearTradeMasks"))
@@ -2062,6 +2081,24 @@ void SohMenu::AddMenuEnhancements() {
                      .Tooltip("Lets Fierce Deity use items he'd normally have grayed out. \"Deku Nuts, Bombs & "
                               "Spells\" allows just those. \"All\" un-grays every item except swords and shields, "
                               "like Timeless Equipment for the deity form. Off keeps his normal item restrictions."));
+
+    AddWidget(path, "Appearance", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "Fierce Deity Tunic Color", WIDGET_CVAR_CHECKBOX)
+        .CVar(CVAR_CHEAT("TransformationMasks.FdTunicColorEnabled"))
+        .Options(CheckboxOptions().DefaultValue(false).Tooltip(
+            "Recolors Fierce Deity's cloth (hat and tunic shoulders/skirt/collar) by tinting its dedicated "
+            "palette. His armor, gauntlets, boots and face are left untouched. Off is byte-identical to "
+            "vanilla FD. The color below is shared with Cosmetics Editor -> Link -> "
+            "\"Fierce Deity Tunic\", so it supports rainbow and the cosmetics randomizer."));
+    AddWidget(path, "Tunic Color", WIDGET_CVAR_COLOR_PICKER)
+        .CVar(CVAR_COSMETIC("Link.FierceDeityTunic"))
+        .Options(ColorPickerOptions()
+                     .DefaultValue(Color_RGBA8{ 255, 255, 255, 255 })
+                     .Tooltip("The tint multiplied onto Fierce Deity's cloth palette. White keeps the original "
+                              "colors; other colors shade the cloth toward that hue. Requires \"Fierce Deity "
+                              "Tunic Color\" to be on. This is the same color as Cosmetics Editor -> "
+                              "Link -> \"Fierce Deity Tunic\" (changing it in either place updates both, "
+                              "and it can be rainbow'd/randomized there)."));
     // FD (2026-07-13): Fierce Deity's Majora's-Mask gait (faster run + slower leg cadence so his big body strides
     // naturally instead of scurrying) is now always on -- it's a clear improvement with no downside, so its toggle
     // and the old slower/frantic behavior were retired.
@@ -2075,16 +2112,6 @@ void SohMenu::AddMenuEnhancements() {
     //     .CVar(CVAR_ENHANCEMENT("TransformationMasks.DoorScaleFix"))
     //     .Options(CheckboxOptions().DefaultValue(true).Tooltip(
     //         "Keeps Fierce Deity from sinking into the floor while opening doors."));
-    AddWidget(path, "Give Fierce Deity's Mask", WIDGET_BUTTON)
-        .Options(ButtonOptions()
-                     .Tooltip("Gives you the Fierce Deity's Mask and equips it to a free C button. "
-                              "Must be in-game.")
-                     .Size(Sizes::Inline))
-        .Callback([](WidgetInfo& info) {
-            if (gPlayState != NULL) {
-                GiveFierceDeityMask();
-            }
-        });
 
     // FD (2026-07-11): Stubs for the remaining transformation masks. Enable once their grant paths
     // exist (mirror the Fierce Deity button; each would call its own extern "C" give function).
@@ -2131,6 +2158,18 @@ void SohMenu::AddMenuEnhancements() {
             "When Young Link uses the hookshot (with Timeless Equipment), plays his own Majora's Mask grapple "
             "sound instead of Adult Link's. Adult and Fierce Deity keep their normal sounds. Off leaves vanilla "
             "behavior as-is."));
+
+    AddWidget(path, "Trade Masks", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "Bunny Hood Fit", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_ENHANCEMENT("BonusSettings.MaskFit"))
+        .Options(ComboboxOptions()
+                     .ComboMap(maskFitFormValues)
+                     .DefaultIndex(3)
+                     .Tooltip("The Bunny Hood is made for Young Link's head, so on the taller Adult and Fierce "
+                              "Deity heads it sinks down into the head. This lifts it back up for the chosen "
+                              "form(s). Only the Bunny Hood is affected -- the other trade masks already sit "
+                              "correctly on every form and are left untouched, and Young Link is never changed. "
+                              "Off = vanilla placement."));
     // FD (2026-07-15): the "MM Young Link Hookshot Hand" first-person viewmodel setting was removed -- that swap is
     // already provided by a separate MM-equipment asset mod, so a fork toggle for it is redundant.
 }
