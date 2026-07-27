@@ -3565,6 +3565,13 @@ static u8 sFdMaskHandedOff = false;
 // clears, MM plays a tail animation -- cl_maskoff (pull the FD mask off, on revert to human) or cl_setmaskend
 // (a form) -- with the mask still drawn, THEN settles to idle. 0 = not settling, 1 = tail playing.
 static u8 sFdSettling = 0;
+// FD (2026-07-27) MASK-PRESS RACE FIX: a queued FD transform request. Pressing the FD-mask C-button records the
+// request here instead of launching Player_SetupMaskTransformation inline; Player_UpdateCommon launches it from a
+// clean actionable frame. This mirrors MM, which defers the transform to Player_ActionHandler_13 rather than
+// firing it mid-item-processing, so a landing/recovery action can't preempt the cutscene the frame it starts
+// (the intermittent "sheathes but doesn't transform, C-button dead until re-press" bug).
+static u8 sFdTransformPending = false;
+static u8 sFdTransformPendingForm = 0;
 
 // ==========================================================================================================
 // FD (2026-07-11) Task 1: mask-transform LIGHTS -- the colored point-light glow + env-light interpolation that
@@ -4102,14 +4109,16 @@ void Player_UpdateTransformationAnim(PlayState* play, Player* this) {
             Math_StepToS(&this->transformEventTimer2, 255, 20);
         }
         if (transformFillScreenFlag == 0) {
-            // FD (2026-07-13): mask TAKE-OFF "shhk" -- Link grabs the mask off his face, just before the face-change
-            // woosh (transformEventTimer1 == 15 below). Play MM's real Mask_Attach sample; fall back to
-            // NA_SE_PL_PUT_OUT_ITEM if the WAV is gone. Fired at frame 12 (was 8) -- frame 8 landed while his hands
-            // were still rising to his face, so the sound started too early; 12 lands it as the mask actually leaves.
-            if (LinkAnimation_OnFrame(&this->skelAnime, 12.0f)) {
-                if (!FdAudio_PlayOneShot("custom/samples/fd/Mask_Attach.wav")) {
-                    Player_PlaySfx(this, NA_SE_PL_PUT_OUT_ITEM);
-                }
+            // FD (2026-07-27) FIX: the early "hands to face" cue on un-transform is the GENERIC engine mask-equip
+            // sound (NA_SE_PL_CHANGE_ARMS -- the same sound OoT plays donning a wearable mask, and the same click
+            // the put-on branch fires at frame 4 above), NOT the custom fd.o2r Mask_Attach WAV that used to be here.
+            // It had also been driven off the ANIMATION clock (LinkAnimation_OnFrame @ 8/12): the revert anim
+            // pz_maskoffstart runs at 2/3 speed and is short enough that its curFrame never reached 8/12, so the
+            // cue simply never fired. Drive it off the REAL-frame timer instead (transformEventTimer1, counted in
+            // Player_MaskTransformation) -- exactly like the face-change woosh below (== 15), which is why that one
+            // is audible. Timer 6 fires it once, very early in the cutscene, well before the face-change.
+            if (this->transformEventTimer1 == 6) {
+                Player_PlaySfx(this, NA_SE_PL_CHANGE_ARMS);
             }
             if (this->transformEventTimer1 == 15) {
                 // FD (2026-07-11): faithful MM mask-off / face-change (0x8E2 == the real Mask_Untransform sample).
@@ -4484,8 +4493,8 @@ void Player_UseItem(PlayState* play, Player* this, s32 item) {
                 // camera IN FRONT of the existing white fade; at the cutscene apex it arms play->ageChangeFlag
                 // ONCE so the EXISTING Player_Draw apex commit still does the age/skeleton swap + FD-sword-on-B
                 // stash/restore (gSaveContext.ship.*). No double commit -- see the HANDOFF note above.
-                if ((play->ageChangeFlag < 0) &&
-                    !(this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK)) { // ignore a re-press mid-transform
+                if ((play->ageChangeFlag < 0) && !(this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK) &&
+                    !sFdTransformPending) { // ignore a re-press mid-transform / while one is already queued
                     u8 nextForm;
                     if (LINK_IS_DEITY) {
                         // Revert: transform back to the REAL prior age (not always adult). ALWAYS allowed,
@@ -4502,7 +4511,15 @@ void Player_UseItem(PlayState* play, Player* this, s32 item) {
                         }
                         nextForm = LINK_AGE_DEITY; // become Fierce Deity
                     }
-                    Player_SetupMaskTransformation(play, this, nextForm);
+                    // FD (2026-07-27) MASK-PRESS RACE FIX: do NOT launch the transform inline here. If this press
+                    // lands on the frame a jumpslash/attack recovery re-installs actionFunc, that recovery preempts
+                    // Player_MaskTransformation before it runs even once, sticking PLAYER_STATE3_TRANSFORMATION_MASK
+                    // and killing the C-button until a re-press -- exactly the intermittent bug. Queue it instead;
+                    // Player_UpdateCommon launches it from a clean actionable frame (this is how MM defers it, via
+                    // Player_ActionHandler_13). The sword put-away still happens together with the transform, inside
+                    // Player_SetupMaskTransformation, when it actually launches.
+                    sFdTransformPendingForm = nextForm;
+                    sFdTransformPending = true;
                 }
                 return;
             } else if (itemAction >= PLAYER_IA_MASK_KEATON) {
@@ -13220,6 +13237,24 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
         sFdSettling = 0;
         sFdMaskHandedOff = false;
         FdAudio_StopOneShots();
+    }
+
+    // FD (2026-07-27) MASK-PRESS RACE FIX (consume side): launch a queued FD transform ONLY from a clean,
+    // actionable frame. Pressing the FD-mask C-button queues the request (Player_UseItem, PLAYER_IA_MASK_DEITY)
+    // rather than firing Player_SetupMaskTransformation inline, because an inline launch on the frame a landing/
+    // recovery action re-installs actionFunc gets preempted before Player_MaskTransformation runs -- sticking the
+    // cutscene flag and killing the C-button (the intermittent "sheathes but doesn't transform" bug). Deferring to
+    // an actionable frame (csAction == 0, Player_CanUpdateItems, not in cutscene/carry/climb, no age-commit in
+    // flight) guarantees nothing overwrites actionFunc that frame, so a single press reliably sheathes AND
+    // transforms. This is how MM defers the transform (Player_ActionHandler_13 on the shared handler chain).
+    if ((this->actor.category == ACTORCAT_PLAYER) && sFdTransformPending &&
+        !(this->stateFlags3 & PLAYER_STATE3_TRANSFORMATION_MASK) && (play->ageChangeFlag < 0) &&
+        (this->csAction == 0) && Player_CanUpdateItems(this) &&
+        !(this->stateFlags1 & (PLAYER_STATE1_IN_CUTSCENE | PLAYER_STATE1_INPUT_DISABLED |
+                               PLAYER_STATE1_CARRYING_ACTOR | PLAYER_STATE1_CLIMBING_LADDER |
+                               PLAYER_STATE1_HANGING_OFF_LEDGE | PLAYER_STATE1_CLIMBING_LEDGE))) {
+        sFdTransformPending = false;
+        Player_SetupMaskTransformation(play, this, sFdTransformPendingForm);
     }
 
     // FD (2026-07-11) bug 5: robust per-frame FD-sword-on-B equip (RE per-frame invariant, z_player.c:12962).
