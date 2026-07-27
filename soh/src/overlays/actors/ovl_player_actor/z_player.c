@@ -394,6 +394,9 @@ void Player_SetPendingFlag(Player* this, PlayState* play) {
 // .bss part 1
 static s32 D_80858AA0;
 static s32 sSavedCurrentMask;
+// FD (2026-07-27) MM Roll Attack Damage: set by Player_Action_Roll during its damage window, consumed at the
+// body cylinder's AT submission in Player_UpdateCommon. Cleared before every action dispatch so it never leaks.
+static s32 sRollAttackActive;
 static Vec3f sInteractWallCheckResult;
 static Input* sControlInput;
 
@@ -6755,6 +6758,21 @@ static s32 MmFlips_FormGatedOn(void) {
     }
 }
 
+// FD (2026-07-27): shared [Off / Human / Fierce Deity / All] form gate for the MM Bonus-Settings options
+// (MM Ledge Momentum, MM Roll Attack Damage). mode: 0 Off / 1 Human / 2 Fierce Deity / 3 All.
+static s32 MmBonus_FormGated(s32 mode) {
+    switch (mode) {
+        case 1:
+            return LINK_IS_HUMAN;
+        case 2:
+            return LINK_IS_DEITY;
+        case 3:
+            return true;
+        default:
+            return false;
+    }
+}
+
 s32 func_8083A4A8(Player* this, PlayState* play) {
     s16 yawDiff;
     LinkAnimationHeader* anim;
@@ -8288,6 +8306,13 @@ void func_8083DF68(Player* this, f32 arg1, s16 arg2) {
 
 void func_8083DFE0(Player* this, f32* arg1, s16* arg2) {
     s16 yawDiff = this->yaw - *arg2;
+    // FD (2026-07-27) MM Ledge Momentum: MM keeps above-cap horizontal speed off a ledge / out of a running
+    // jump and bleeds it gradually (x4 decel + turn-brake past 1.5x the run cap) instead of OoT's instant
+    // per-frame hard clamp to the run cap. Gated by BonusSettings.MmLedgeMomentum per form. Port of MM's
+    // func_8083CBC4. When off, behavior is byte-identical to vanilla.
+    s32 mmMomentum = MmBonus_FormGated(CVarGetInteger(CVAR_ENHANCEMENT("BonusSettings.MmLedgeMomentum"), 2));
+    f32 decel = 0.1f;
+    f32 brake = 1.0f;
 
     if (this->meleeWeaponState == 0) {
         float maxSpeed = R_RUN_SPEED_LIMIT / 100.0f;
@@ -8312,15 +8337,23 @@ void func_8083DFE0(Player* this, f32* arg1, s16* arg2) {
             }
         }
 
-        this->linearVelocity = CLAMP(this->linearVelocity, -maxSpeed, maxSpeed);
+        if (mmMomentum) {
+            // No hard clamp -- carry the momentum, just bleed it faster once well over the run cap.
+            if ((maxSpeed * 1.5f) < fabsf(this->linearVelocity)) {
+                decel = 0.4f;
+                brake = 4.0f;
+            }
+        } else {
+            this->linearVelocity = CLAMP(this->linearVelocity, -maxSpeed, maxSpeed);
+        }
     }
 
     if (ABS(yawDiff) > 0x6000) {
-        if (Math_StepToF(&this->linearVelocity, 0.0f, 1.0f)) {
+        if (Math_StepToF(&this->linearVelocity, 0.0f, brake)) {
             this->yaw = *arg2;
         }
     } else {
-        Math_AsymStepToF(&this->linearVelocity, *arg1, 0.05f, 0.1f);
+        Math_AsymStepToF(&this->linearVelocity, *arg1, 0.05f, decel);
         Math_ScaledStepToS(&this->yaw, *arg2, 200);
     }
 }
@@ -11006,6 +11039,15 @@ void Player_Action_Roll(Player* this, PlayState* play) {
         Player_SetInvulnerability(this, -10);
     }
 
+    // FD (2026-07-27) MM Roll Attack Damage: flag the body cylinder as a light attack (dmg 1, radius 12) for
+    // anim frames 8-18, matching MM's rolling attack. Consumed at the cylinder's AT submission in
+    // Player_UpdateCommon (the roll already grants negative invincibility here, so the cylinder is submitted as
+    // AT during this window). Gated by BonusSettings.MmRollDamage per form.
+    if (MmBonus_FormGated(CVarGetInteger(CVAR_ENHANCEMENT("BonusSettings.MmRollDamage"), 2)) &&
+        (this->skelAnime.curFrame >= 8.0f) && (this->skelAnime.curFrame < 18.0f)) {
+        sRollAttackActive = true;
+    }
+
     if (!func_80842964(this, play)) {
         if (this->av2.bonked) {
             Math_StepToF(&this->linearVelocity, 0.0f, 2.0f);
@@ -13662,6 +13704,11 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
             }
         }
 
+        // FD (2026-07-27) MM Roll Attack Damage: clear the roll-attack flag before every action runs; only the
+        // roll action re-arms it (for its 8-18 frame window), so the body cylinder can never stay a damage
+        // dealer once the roll ends or is interrupted.
+        sRollAttackActive = false;
+
         if (GameInteractor_Should(VB_EXECUTE_PLAYER_ACTION_FUNC, !(this->stateFlags3 & PLAYER_STATE3_PAUSE_ACTION_FUNC),
                                   this, input)) {
             this->actionFunc(this, play);
@@ -13739,6 +13786,20 @@ void Player_UpdateCommon(Player* this, PlayState* play, Input* input) {
                 CollisionCheck_SetAC(play, &play->colChkCtx, &this->cylinder.base);
 
                 if (this->invincibilityTimer < 0) {
+                    // FD (2026-07-27) MM Roll Attack Damage: the body cylinder is only ever submitted as an AT
+                    // collider here (during negative-invincibility frames, i.e. the roll). Vanilla leaves it
+                    // AT-inert (AT_NONE / TOUCH_NONE). If the roll flagged its damage window this frame, arm it
+                    // as a light player attack (dmg 1, radius already 12) with MM's DMG_NORMAL_ROLL flag; else
+                    // keep it inert. Configured here, the single submission point, so it can't leak.
+                    if (sRollAttackActive) {
+                        this->cylinder.base.atFlags = AT_ON | AT_TYPE_PLAYER;
+                        this->cylinder.info.toucherFlags = TOUCH_ON | TOUCH_NEAREST;
+                        this->cylinder.info.toucher.dmgFlags = 0x04000000; // DMG_NORMAL_ROLL (1 << 0x1A), matches MM
+                        this->cylinder.info.toucher.damage = 1;
+                    } else {
+                        this->cylinder.base.atFlags = AT_NONE;
+                        this->cylinder.info.toucherFlags = TOUCH_NONE;
+                    }
                     CollisionCheck_SetAT(play, &play->colChkCtx, &this->cylinder.base);
                 }
             }

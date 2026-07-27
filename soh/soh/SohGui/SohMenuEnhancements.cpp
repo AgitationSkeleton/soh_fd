@@ -126,6 +126,12 @@ static const std::map<int32_t, const char*> maskFitFormValues = {
     { 0, "Off" }, { 1, "Adult" }, { 2, "Fierce Deity" }, { 3, "Both" },
 };
 
+// FD (2026-07-27): [Off / Human / Fierce Deity / All] form gate shared by the MM movement/combat Bonus-Settings
+// options. Keep in sync with MmBonus_FormGated (z_player.c). 0 Off / 1 Human / 2 Fierce Deity / 3 All.
+static const std::map<int32_t, const char*> mmFormHumanFdValues = {
+    { 0, "Off" }, { 1, "Human" }, { 2, "Fierce Deity" }, { 3, "All" },
+};
+
 // FD (2026-07-15): "Unrestrict Items for FD" cheat dropdown (Transformation Masks). Keep in sync with
 // Parameter_CanUseItem (z_parameter.c). 0 Off / 1 Nuts+Bombs+Spells / 2 All except swords+shields.
 static const std::map<int32_t, const char*> fdUnrestrictItemsValues = {
@@ -2158,6 +2164,23 @@ void SohMenu::AddMenuEnhancements() {
             "When Young Link uses the hookshot (with Timeless Equipment), plays his own Majora's Mask grapple "
             "sound instead of Adult Link's. Adult and Fierce Deity keep their normal sounds. Off leaves vanilla "
             "behavior as-is."));
+    AddWidget(path, "MM Ledge Momentum", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_ENHANCEMENT("BonusSettings.MmLedgeMomentum"))
+        .Options(ComboboxOptions()
+                     .ComboMap(mmFormHumanFdValues)
+                     .DefaultIndex(2)
+                     .Tooltip("Gives the chosen form(s) Majora's Mask's airborne feel: instead of instantly "
+                              "capping your horizontal speed the moment you leave the ground, above-cap momentum "
+                              "from running off a ledge or a running jump is carried and bled off gradually. Off "
+                              "keeps OoT's vanilla hard speed cap in the air."));
+    AddWidget(path, "MM Roll Attack Damage", WIDGET_CVAR_COMBOBOX)
+        .CVar(CVAR_ENHANCEMENT("BonusSettings.MmRollDamage"))
+        .Options(ComboboxOptions()
+                     .ComboMap(mmFormHumanFdValues)
+                     .DefaultIndex(2)
+                     .Tooltip("Lets the chosen form(s) deal light contact damage while rolling, like in Majora's "
+                              "Mask (the roll's body-check hits for a small amount mid-roll). Off keeps OoT's "
+                              "vanilla damage-less roll."));
 
     AddWidget(path, "Trade Masks", WIDGET_SEPARATOR_TEXT);
     AddWidget(path, "Bunny Hood Fit", WIDGET_CVAR_COMBOBOX)
